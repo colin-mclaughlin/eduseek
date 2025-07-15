@@ -9,15 +9,16 @@ from sqlalchemy import and_
 from uuid import UUID
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 def extract_deadlines_from_text(text: str) -> List[Dict]:
+    client = openai.Client(api_key=OPENAI_API_KEY)
     prompt = (
         "Extract all assignment, quiz, test, and project deadlines with dates and titles from the following text. "
         "Return a JSON array where each item has: 'title', 'due_date' (ISO 8601 format), and 'source' (always 'file'). "
         "If no deadlines are found, return an empty array.\n\nText:\n" + text
     )
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are an assistant that extracts academic deadlines from course documents."},
@@ -28,7 +29,7 @@ def extract_deadlines_from_text(text: str) -> List[Dict]:
     )
     import json
     import re
-    content = response.choices[0].message["content"].strip()
+    content = response.choices[0].message.content.strip()
     match = re.search(r'\[.*\]', content, re.DOTALL)
     if match:
         try:

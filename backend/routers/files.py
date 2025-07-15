@@ -12,13 +12,14 @@ from models.deadline import Deadline
 from schemas.file import FileOut
 from fastapi import Depends
 from typing import List
+import traceback
 
 router = APIRouter()
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     try:
-        file_path = save_uploaded_file(file)
+        file_path = await save_uploaded_file(file)
         text = extract_text_from_file(file_path)
         chunks = chunk_text(text)
         summary = summarize_chunks(chunks)
@@ -38,6 +39,8 @@ async def upload_file(file: UploadFile = File(...)):
         embed_chunks(chunks, metadata)
         return JSONResponse(content={"summary": summary, "deadlines": deadlines})
     except Exception as e:
+        print("UPLOAD ERROR:", e)
+        traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(e))
 
 class QueryRequest(BaseModel):
