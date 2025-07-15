@@ -13,4 +13,12 @@ class FileBase(BaseModel):
     embedding_id: str | None = None
 
     class Config:
+        orm_mode = True
+
+class FileOut(BaseModel):
+    filename: str
+    summary: str | None = None
+    deadline: str | None = None  # ISO 8601 string or None
+
+    class Config:
         orm_mode = True 

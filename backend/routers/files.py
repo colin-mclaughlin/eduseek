@@ -5,6 +5,13 @@ from services.deadline_service import extract_deadlines_from_text, save_deadline
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uuid
+from sqlalchemy.orm import Session
+from core.database import SessionLocal
+from models.file import File as FileModel
+from models.deadline import Deadline
+from schemas.file import FileOut
+from fastapi import Depends
+from typing import List
 
 router = APIRouter()
 
@@ -51,4 +58,31 @@ async def query_files(request: QueryRequest):
         ]
         return {"results": matches}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e)) 
+        raise HTTPException(status_code=400, detail=str(e))
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@router.get("/", response_model=List[FileOut])
+def get_files(db: Session = Depends(get_db)):
+    files = db.query(FileModel).all()
+    result = []
+    for f in files:
+        # Find the soonest deadline for this file (if any)
+        deadline_obj = (
+            db.query(Deadline)
+            .filter(Deadline.file_id == f.id)
+            .order_by(Deadline.due_date.asc())
+            .first()
+        )
+        deadline = deadline_obj.due_date.isoformat() if deadline_obj else None
+        result.append(FileOut(
+            filename=f.filename,
+            summary=f.summary,
+            deadline=deadline
+        ))
+    return result 

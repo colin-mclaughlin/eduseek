@@ -14,7 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(files_router, prefix="/files")
+app.include_router(files_router, prefix="/api/files", tags=["Files"])
 app.include_router(assistant_router)
 
 @app.get("/ping")
