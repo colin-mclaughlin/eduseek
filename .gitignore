@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+
+# Environment variables
+.env
+
+# Frontend builds and dependencies
+frontend/node_modules/
+frontend/dist/
+
+# File uploads and generated data
+backend/uploads/
+
+# SQLite or local DBs (if any)
+*.sqlite3
+
+# Mac and system files
+.DS_Store 
