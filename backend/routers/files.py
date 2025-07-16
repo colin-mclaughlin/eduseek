@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Body
 from services.file_service import save_uploaded_file, extract_text_from_file, chunk_text, summarize_chunks
 from services.embedding_service import embed_chunks, get_or_create_chroma_collection
 from services.deadline_service import extract_deadlines_from_text, save_deadlines
@@ -15,6 +15,8 @@ from typing import List
 import traceback
 from sqlalchemy import select
 from pathlib import Path
+import openai
+import os
 
 router = APIRouter()
 
@@ -30,9 +32,10 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
     try:
         file_path = await save_uploaded_file(file)
         text = extract_text_from_file(file_path)
-        # Save file entry to DB (no summary yet)
+        # Save file entry to DB (now with text)
         file_entry = FileModel(
             filename=file.filename,
+            text=text,  # <-- Save extracted text
             summary=None
         )
         db.add(file_entry)
@@ -65,24 +68,32 @@ async def summarize_file(file_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 class QueryRequest(BaseModel):
-    query: str
+    question: str
 
-@router.post("/query")
-async def query_files(request: QueryRequest):
+@router.post("/query/")
+def query_files(request: QueryRequest, db: Session = Depends(get_db)):
+    print("DEBUG: /query/ endpoint called")
+    all_files = db.query(FileModel).all()
+    combined_text = " ".join([file.text for file in all_files if file.text])
+
+    print(f"DEBUG: Combined text for Q&A: {repr(combined_text[:500])}")  # Only print first 500 chars
+
+    if not combined_text:
+        raise HTTPException(status_code=404, detail="No file text available")
+
+    prompt = f"Answer this question using the course content below.\n\nQuestion: {request.question}\n\nContent:\n{combined_text}"
+
     try:
-        db = get_or_create_chroma_collection()
-        results = db.similarity_search_with_score(request.query, k=3)
-        matches = [
-            {
-                "chunk": doc.page_content,
-                "metadata": doc.metadata,
-                "score": score
-            }
-            for doc, score in results
-        ]
-        return {"results": matches}
+        client = openai.Client(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        return {"answer": response.choices[0].message.content}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        print(f"OpenAI error: {e}")
+        raise HTTPException(status_code=500, detail="OpenAI request failed")
 
 @router.get("/", response_model=List[FileOut])
 def get_files(db: Session = Depends(get_db)):

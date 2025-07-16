@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import FileUploader from "../components/FileUploader";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 
 interface FileData {
   id: number;
@@ -15,6 +16,9 @@ export default function Files() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [summarizingId, setSummarizingId] = useState<number | null>(null);
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [asking, setAsking] = useState(false);
 
   const fetchFiles = useCallback(() => {
     setLoading(true);
@@ -58,6 +62,23 @@ export default function Files() {
     } else {
       console.error("Failed to delete file:", await res.text());
     }
+  };
+
+  const handleAsk = async () => {
+    setAsking(true);
+    setAnswer("");
+    const res = await fetch("http://localhost:8000/api/files/query/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setAnswer(data.answer);
+    } else {
+      setAnswer("Query failed: " + (await res.text()));
+    }
+    setAsking(false);
   };
 
   useEffect(() => {
@@ -111,6 +132,25 @@ export default function Files() {
           ))}
         </div>
       )}
+      <div className="mt-8 border-t pt-4 max-w-2xl mx-auto">
+        <h2 className="text-xl font-bold mb-2">Ask About Your Files</h2>
+        <Input
+          value={question}
+          onChange={e => setQuestion(e.target.value)}
+          placeholder="Ask a question..."
+          className="mb-2"
+          disabled={asking}
+        />
+        <Button onClick={handleAsk} disabled={asking || !question.trim()} className="bg-indigo-600 text-white px-4 py-1 rounded">
+          {asking ? "Asking..." : "Ask"}
+        </Button>
+        {answer && (
+          <div className="mt-4 p-4 border rounded bg-gray-50">
+            <p className="font-medium text-sm text-gray-600">Answer:</p>
+            <p>{answer}</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 } 
