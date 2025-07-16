@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import FileSummaryCard from "./FileSummaryCard";
 import { Skeleton } from "./ui/skeleton";
 import QuestionInput from "./QuestionInput";
@@ -22,7 +22,7 @@ function formatDeadline(deadline: string | null): string | null {
   })}`;
 }
 
-export const DashboardView: React.FC = () => {
+export const DashboardView: React.FC<{ triggerRefresh?: boolean } > = ({ triggerRefresh }) => {
   const [files, setFiles] = useState<FileData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +32,8 @@ export const DashboardView: React.FC = () => {
   const [qaError, setQaError] = useState<string | null>(null);
   const [qaResults, setQaResults] = useState<AnswerResult[]>([]);
 
-  useEffect(() => {
+  // Refetch files from backend
+  const fetchFiles = useCallback(() => {
     setLoading(true);
     setError(null);
     fetch("http://localhost:8000/api/files")
@@ -48,39 +49,53 @@ export const DashboardView: React.FC = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  // Mock Q&A handler
-  const handleAskQuestion = (question: string) => {
+  // Poll for new files after upload
+  const pollFiles = useCallback(() => {
+    let count = 0;
+    const interval = setInterval(() => {
+      fetchFiles();
+      count++;
+      if (count >= 5) clearInterval(interval);
+    }, 2000);
+  }, [fetchFiles]);
+
+  useEffect(() => {
+    fetchFiles();
+  }, [fetchFiles, triggerRefresh]);
+
+  // Real Q&A handler
+  const handleAskQuestion = async (question: string) => {
     setQaLoading(true);
     setQaError(null);
-    // Simulate async call
-    setTimeout(() => {
-      // Example mock results
-      if (question.toLowerCase().includes("deadline")) {
-        setQaResults([
-          {
-            chunk: "The final project is due July 22, 2025. Please submit via the portal.",
-            filename: "CS101_Syllabus.pdf",
-            score: 0.92,
-          },
-          {
-            chunk: "Your project proposal is due at the end of week 4.",
-            filename: "Project_Proposal.docx",
-            score: 0.87,
-          },
-        ]);
-      } else if (question.trim()) {
-        setQaResults([
-          {
-            chunk: "Introduction to computer science, history, and basic concepts.",
-            filename: "Lecture_Notes_Week1.txt",
-            score: 0.81,
-          },
-        ]);
-      } else {
-        setQaResults([]);
-      }
+    setQaResults([]);
+    try {
+      const res = await fetch("http://localhost:8000/api/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      if (!res.ok) throw new Error("Failed to get answer");
+      const data = await res.json();
+      // Support both {results: [...]} and direct array
+      const results = Array.isArray(data)
+        ? data
+        : Array.isArray(data.results)
+        ? data.results
+        : [];
+      // Map backend fields to AnswerResult
+      setQaResults(
+        results.map((r: any) => ({
+          chunk: r.content || r.chunk || "",
+          filename: r.filename || "",
+          score: typeof r.score === "number" ? r.score : undefined,
+        }))
+      );
+    } catch (err: any) {
+      setQaError(err.message || "Error getting answer");
+      setQaResults([]);
+    } finally {
       setQaLoading(false);
-    }, 900);
+    }
   };
 
   if (loading) {

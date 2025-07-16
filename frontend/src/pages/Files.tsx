@@ -1,9 +1,100 @@
+import React, { useState, useEffect, useCallback } from "react";
 import FileUploader from "@/components/FileUploader";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+
+interface FileData {
+  filename: string;
+  summary: string | null;
+  deadline: string | null;
+}
 
 export default function Files() {
+  const [files, setFiles] = useState<FileData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [summarizingId, setSummarizingId] = useState<string | null>(null);
+
+  const fetchFiles = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fetch("http://localhost:8000/api/files")
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Failed to fetch files");
+        const data = await res.json();
+        setFiles(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        setError("Error loading files. Please try again later.");
+        setFiles([]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSummarize = async (fileId: string) => {
+    setSummarizingId(fileId);
+    try {
+      await fetch(`http://localhost:8000/api/files/summarize/${fileId}`, { method: "POST" });
+      // Optionally poll for summary to appear
+      let tries = 0;
+      let found = false;
+      while (tries < 5 && !found) {
+        await new Promise(res => setTimeout(res, 2000));
+        await fetchFiles();
+        const file = files.find(f => f.filename === fileId);
+        if (file && file.summary) found = true;
+        tries++;
+      }
+      await fetchFiles();
+    } catch (e) {
+      // Optionally show error
+    } finally {
+      setSummarizingId(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchFiles();
+  }, [fetchFiles]);
+
   return (
     <div>
-      <FileUploader />
+      <FileUploader onUploadSuccess={fetchFiles} />
+      {loading ? (
+        <div className="text-center text-muted-foreground mt-8">Loading files...</div>
+      ) : error ? (
+        <div className="text-center text-red-500 mt-8">{error}</div>
+      ) : files.length === 0 ? (
+        <div className="text-center text-muted-foreground mt-8">No files uploaded yet.</div>
+      ) : (
+        <div className="max-w-2xl mx-auto mt-8 flex flex-col gap-4">
+          {files.map((f, i) => (
+            <Card key={f.filename + i}>
+              <CardHeader>
+                <CardTitle className="text-base font-medium truncate max-w-xs" title={f.filename}>{f.filename}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-sm text-muted-foreground line-clamp-3 whitespace-pre-line mb-2">
+                  {f.summary ? f.summary.slice(0, 180) + (f.summary.length > 180 ? "..." : "") : "No summary available."}
+                </div>
+                {f.deadline && (
+                  <span className="text-xs text-amber-700 bg-amber-100 rounded px-2 py-1">Due {new Date(f.deadline).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</span>
+                )}
+                {!f.summary && (
+                  <Button
+                    size="sm"
+                    className="mt-2"
+                    disabled={summarizingId === f.filename}
+                    onClick={() => handleSummarize(f.filename)}
+                  >
+                    {summarizingId === f.filename ? "Summarizing..." : "Summarize"}
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 } 

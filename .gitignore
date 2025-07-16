@@ -1,23 +1,33 @@
-# Python
+# Node.js frontend
+frontend/node_modules
+frontend/dist
+*.log
+
+# Python backend
+backend/.venv/
 __pycache__/
 *.pyc
-*.pyo
 
-# Virtual environments
-venv/
-
-# Environment variables
+# Environment
 .env
+.env.*
 
-# Frontend builds and dependencies
-frontend/node_modules/
-frontend/dist/
+# IDE/editor junk
+.vscode/
+.DS_Store
 
-# File uploads and generated data
-backend/uploads/
+# User-uploaded files
+*.pdf
+*.docx
 
-# SQLite or local DBs (if any)
+# LangChain artifacts
+*.bin
 *.sqlite3
 
-# Mac and system files
-.DS_Store 
+# App upload/output folders
+uploads/
+backend/uploads/
+
+# Python venv (if not already ignored)
+.venv/
+venv/ 

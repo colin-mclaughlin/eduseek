@@ -15,7 +15,11 @@ interface UploadResult {
   deadlines: Deadline[];
 }
 
-export default function FileUploader() {
+interface FileUploaderProps {
+  onUploadSuccess?: () => void;
+}
+
+export default function FileUploader({ onUploadSuccess }: FileUploaderProps) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<UploadResult | null>(null);
@@ -68,6 +72,7 @@ export default function FileUploader() {
       if (!res.ok) throw new Error("Upload failed");
       const data = await res.json();
       setResult(data);
+      if (onUploadSuccess) onUploadSuccess();
     } catch (err: any) {
       setError(err.message || "Upload failed");
     } finally {

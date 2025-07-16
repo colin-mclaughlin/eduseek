@@ -5,6 +5,9 @@ openai
 chromadb
 python-dotenv
 sqlalchemy
-psycopg2-binary
 pypdf
 tiktoken
+python-multipart
+pydantic
+python-docx
+unstructured

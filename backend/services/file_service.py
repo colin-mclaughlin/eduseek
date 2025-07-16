@@ -2,8 +2,7 @@ import os
 from pathlib import Path
 from typing import List
 from fastapi import UploadFile
-from langchain.document_loaders import PyPDFLoader, UnstructuredPowerPointLoader, TextLoader
-from langchain_community.document_loaders import UnstructuredWordDocumentLoader
+from langchain_community.document_loaders import PyPDFLoader, UnstructuredPowerPointLoader, TextLoader, UnstructuredWordDocumentLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import openai
 from dotenv import load_dotenv
