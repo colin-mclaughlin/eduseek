@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
-import FileUploader from "@/components/FileUploader";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import FileUploader from "../components/FileUploader";
+import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
+import { Button } from "../components/ui/button";
 
 interface FileData {
   id: number;
@@ -51,6 +51,15 @@ export default function Files() {
     }
   };
 
+  const handleDelete = async (fileId: number) => {
+    const res = await fetch(`http://localhost:8000/api/files/${fileId}`, { method: "DELETE" });
+    if (res.ok) {
+      setFiles(prev => prev.filter(file => file.id !== fileId));
+    } else {
+      console.error("Failed to delete file:", await res.text());
+    }
+  };
+
   useEffect(() => {
     fetchFiles();
   }, [fetchFiles]);
@@ -78,16 +87,25 @@ export default function Files() {
                 {f.deadline && (
                   <span className="text-xs text-amber-700 bg-amber-100 rounded px-2 py-1">Due {new Date(f.deadline).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</span>
                 )}
-                {!f.summary && (
+                <div className="flex gap-2 mt-2">
+                  {!f.summary && (
+                    <Button
+                      size="sm"
+                      className="mt-0"
+                      disabled={summarizingId === f.id}
+                      onClick={() => handleSummarize(f)}
+                    >
+                      {summarizingId === f.id ? "Summarizing..." : "Summarize"}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
-                    className="mt-2"
-                    disabled={summarizingId === f.id}
-                    onClick={() => handleSummarize(f)}
+                    className="bg-red-500 hover:bg-red-600 text-white mt-0"
+                    onClick={() => handleDelete(f.id)}
                   >
-                    {summarizingId === f.id ? "Summarizing..." : "Summarize"}
+                    Delete
                   </Button>
-                )}
+                </div>
               </CardContent>
             </Card>
           ))}

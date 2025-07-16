@@ -108,4 +108,21 @@ def get_files(db: Session = Depends(get_db)):
     except Exception as e:
         print("GET FILES ERROR:", e)
         import traceback; traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/{file_id}", status_code=204)
+def delete_file(file_id: int, db: Session = Depends(get_db)):
+    file = db.query(FileModel).filter(FileModel.id == file_id).first()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+    # Delete file from disk if it exists
+    file_path = Path('uploads') / file.filename
+    try:
+        if file_path.exists():
+            file_path.unlink()
+    except Exception as e:
+        print(f"Error deleting file from disk: {e}")
+        # Continue to delete from DB anyway
+    db.delete(file)
+    db.commit()
+    return 
