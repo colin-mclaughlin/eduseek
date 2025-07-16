@@ -19,7 +19,7 @@ export default function Files() {
   const fetchFiles = useCallback(() => {
     setLoading(true);
     setError(null);
-    fetch("http://localhost:8000/api/files")
+    fetch("http://localhost:8000/api/files/")
       .then(async (res) => {
         if (!res.ok) throw new Error("Failed to fetch files");
         const data = await res.json();
@@ -39,18 +39,11 @@ export default function Files() {
     }
     setSummarizingId(file.id);
     try {
-      await fetch(`http://localhost:8000/api/files/summarize/${file.id}`, { method: "POST" });
-      // Optionally poll for summary to appear
-      let tries = 0;
-      let found = false;
-      while (tries < 5 && !found) {
-        await new Promise(res => setTimeout(res, 2000));
-        await fetchFiles();
-        const updated = files.find(f => f.id === file.id);
-        if (updated && updated.summary) found = true;
-        tries++;
+      const res = await fetch(`http://localhost:8000/api/files/summarize/${file.id}`, { method: "POST" });
+      if (res.ok) {
+        const updated = await res.json();
+        setFiles(prev => prev.map(f => (f.id === updated.id ? { ...f, summary: updated.summary } : f)));
       }
-      await fetchFiles();
     } catch (e) {
       // Optionally show error
     } finally {

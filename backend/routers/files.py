@@ -58,7 +58,7 @@ async def summarize_file(file_id: str, db: Session = Depends(get_db)):
         file_entry.summary = summary
         db.commit()
         db.refresh(file_entry)
-        return {"id": str(file_entry.id), "filename": file_entry.filename, "summary": file_entry.summary}
+        return file_entry
     except Exception as e:
         print("SUMMARIZE ERROR:", e)
         traceback.print_exc()
