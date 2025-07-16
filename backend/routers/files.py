@@ -136,4 +136,27 @@ def delete_file(file_id: int, db: Session = Depends(get_db)):
         # Continue to delete from DB anyway
     db.delete(file)
     db.commit()
-    return 
+    return
+
+@router.get("/smart-suggestion")
+def get_smart_suggestion(db: Session = Depends(get_db)):
+    files = db.query(FileModel).filter(FileModel.summary.isnot(None)).all()
+    if not files:
+        return {"suggestion": "Upload and summarize a file to get started."}
+    
+    summaries = [f.summary for f in files if f.summary]
+    context = " ".join(summaries)
+
+    prompt = f"Based on the following summarized lecture material, give one helpful study suggestion:\n\n{context}"
+
+    try:
+        client = openai.Client(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        suggestion = response.choices[0].message.content.strip()
+        return {"suggestion": suggestion}
+    except Exception as e:
+        print(f"Suggestion generation failed: {e}")
+        return {"suggestion": "Could not generate a suggestion right now."} 

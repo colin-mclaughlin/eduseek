@@ -28,6 +28,8 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
   const [files, setFiles] = useState<FileData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
   const navigate = useNavigate();
 
   // Refetch files from backend
@@ -51,8 +53,18 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
     fetchFiles();
   }, [fetchFiles, triggerRefresh]);
 
-  const handleGiveSuggestion = () => {
-    navigate("/assistant");
+  const handleGetSuggestion = async () => {
+    setLoadingSuggestion(true);
+    try {
+      const response = await fetch("http://localhost:8000/api/files/smart-suggestion");
+      const data = await response.json();
+      setSuggestion(data.suggestion || "No suggestion available right now.");
+    } catch (error) {
+      console.error("Error fetching suggestion:", error);
+      setSuggestion("Failed to load suggestion.");
+    } finally {
+      setLoadingSuggestion(false);
+    }
   };
 
   if (loading) {
@@ -161,11 +173,17 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
           </p>
           <Button 
             variant="default" 
-            onClick={handleGiveSuggestion}
+            onClick={handleGetSuggestion}
             disabled={summarizedFiles === 0}
           >
-            {summarizedFiles > 0 ? "Give me a suggestion" : "Get file summaries first"}
+            {loadingSuggestion ? "Thinking..." : (summarizedFiles > 0 ? "Give me a suggestion" : "Get file summaries first")}
           </Button>
+          
+          {suggestion && (
+            <div className="mt-4 text-sm text-muted-foreground bg-gray-100 p-4 rounded-lg border">
+              💡 {suggestion}
+            </div>
+          )}
         </CardContent>
       </Card>
 
