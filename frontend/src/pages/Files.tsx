@@ -4,6 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 interface FileData {
+  id: number;
   filename: string;
   summary: string | null;
   deadline: string | null;
@@ -13,7 +14,7 @@ export default function Files() {
   const [files, setFiles] = useState<FileData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [summarizingId, setSummarizingId] = useState<string | null>(null);
+  const [summarizingId, setSummarizingId] = useState<number | null>(null);
 
   const fetchFiles = useCallback(() => {
     setLoading(true);
@@ -31,18 +32,22 @@ export default function Files() {
       .finally(() => setLoading(false));
   }, []);
 
-  const handleSummarize = async (fileId: string) => {
-    setSummarizingId(fileId);
+  const handleSummarize = async (file: FileData) => {
+    if (!file || typeof file.id !== 'number') {
+      console.error("Invalid file ID:", file?.id);
+      return;
+    }
+    setSummarizingId(file.id);
     try {
-      await fetch(`http://localhost:8000/api/files/summarize/${fileId}`, { method: "POST" });
+      await fetch(`http://localhost:8000/api/files/summarize/${file.id}`, { method: "POST" });
       // Optionally poll for summary to appear
       let tries = 0;
       let found = false;
       while (tries < 5 && !found) {
         await new Promise(res => setTimeout(res, 2000));
         await fetchFiles();
-        const file = files.find(f => f.filename === fileId);
-        if (file && file.summary) found = true;
+        const updated = files.find(f => f.id === file.id);
+        if (updated && updated.summary) found = true;
         tries++;
       }
       await fetchFiles();
@@ -68,8 +73,8 @@ export default function Files() {
         <div className="text-center text-muted-foreground mt-8">No files uploaded yet.</div>
       ) : (
         <div className="max-w-2xl mx-auto mt-8 flex flex-col gap-4">
-          {files.map((f, i) => (
-            <Card key={f.filename + i}>
+          {(files ?? []).map((f) => (
+            <Card key={f.id}>
               <CardHeader>
                 <CardTitle className="text-base font-medium truncate max-w-xs" title={f.filename}>{f.filename}</CardTitle>
               </CardHeader>
@@ -84,10 +89,10 @@ export default function Files() {
                   <Button
                     size="sm"
                     className="mt-2"
-                    disabled={summarizingId === f.filename}
-                    onClick={() => handleSummarize(f.filename)}
+                    disabled={summarizingId === f.id}
+                    onClick={() => handleSummarize(f)}
                   >
-                    {summarizingId === f.filename ? "Summarizing..." : "Summarize"}
+                    {summarizingId === f.id ? "Summarizing..." : "Summarize"}
                   </Button>
                 )}
               </CardContent>

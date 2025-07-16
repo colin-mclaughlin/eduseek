@@ -116,7 +116,7 @@ export default function FileUploader({ onUploadSuccess }: FileUploaderProps) {
           <p className="mb-4 text-gray-800 dark:text-gray-200">{result.summary}</p>
           <h3 className="font-semibold mb-1">Deadlines</h3>
           <ul className="list-disc pl-5 space-y-1">
-            {result.deadlines.map((d, i) => (
+            {(result.deadlines ?? []).map((d, i) => (
               <li key={i} className="text-gray-700 dark:text-gray-300">
                 <span className="font-medium">{d.title}</span> — {d.due_date} <span className="italic text-xs">({d.type})</span>
               </li>

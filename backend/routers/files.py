@@ -14,6 +14,7 @@ from fastapi import Depends
 from typing import List
 import traceback
 from sqlalchemy import select
+from pathlib import Path
 
 router = APIRouter()
 
@@ -50,7 +51,7 @@ async def summarize_file(file_id: str, db: Session = Depends(get_db)):
         if not file_entry:
             raise HTTPException(status_code=404, detail="File not found")
         # Load text from file
-        file_path = file_entry.filepath
+        file_path = Path('uploads') / file_entry.filename
         text = extract_text_from_file(file_path)
         chunks = chunk_text(text)
         summary = summarize_chunks(chunks)
@@ -98,6 +99,7 @@ def get_files(db: Session = Depends(get_db)):
             )
             deadline = deadline_obj.due_date.isoformat() if deadline_obj else None
             result.append(FileOut(
+                id=f.id,
                 filename=f.filename,
                 summary=f.summary,
                 deadline=deadline
