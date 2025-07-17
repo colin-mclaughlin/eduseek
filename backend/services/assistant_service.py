@@ -32,41 +32,69 @@ def generate_daily_plan(deadlines: List[Deadline]) -> str:
     )
     return response.choices[0].message.content.strip()
 
-def query_files(query: str, course_filter: str = None, user_id: int = None, course_id: int = None) -> Dict[str, Any]:
+def query_files(query: str, course_filter: str = None, user_id: int = None, course_id: str = None, file_id: str = None) -> Dict[str, Any]:
     """
     Query the embedded files and generate a contextual response.
-
     Args:
         query: The user's question
         course_filter: Optional course name to filter results
-
+        course_id: Optional course ID to filter results
+        file_id: Optional file ID to filter results
     Returns:
         Dict containing answer and sources
     """
     try:
         # Get the ChromaDB collection
         db = get_or_create_chroma_collection()
+        print(f"[DEBUG] ChromaDB collection object: {db}")
 
-        # Search for relevant documents
-        print(f"[Assistant] Query: {query}")
-        results = db.similarity_search_with_score(query, k=5)
-        print(f"[Assistant] Retrieved {len(results)} results from ChromaDB.")
-        filters = {}
-        if user_id is not None:
-            filters['user_id'] = str(user_id)
-        if course_id is not None:
-            filters['course_id'] = str(course_id)
-        print(f"[Assistant] Filters used: {filters}")
-        # Filter results by user_id and course_id if present
-        if filters:
-            def match_filters(meta):
-                for k, v in filters.items():
-                    if meta.get(k) != v:
-                        return False
-                return True
-            results = [(doc, score) for doc, score in results if match_filters(doc.metadata)]
-        for idx, (doc, score) in enumerate(results):
-            print(f"[Assistant] Result {idx}: score={score}, metadata={doc.metadata}")
+        # Build filter for ChromaDB
+        print(f"[DEBUG] file_id: {file_id} (type: {type(file_id)})")
+        print(f"[DEBUG] course_id: {course_id} (type: {type(course_id)})")
+        if file_id:
+            chroma_filter = {"file_id": str(file_id)}
+        elif course_id:
+            chroma_filter = {"course_id": str(course_id)}
+        else:
+            chroma_filter = {}
+        print(f"[Assistant] ChromaDB filter: {chroma_filter}")
+
+        # Use the public retriever interface to ensure embedding function is used
+        try:
+            retriever = db.as_retriever(search_kwargs={"k": 5, "filter": chroma_filter})
+            docs_and_scores = retriever.get_relevant_documents(query)
+            # Simulate the previous (doc, score) tuple structure
+            results = [(doc, 0.0) for doc in docs_and_scores]  # Score not available, set to 0.0
+        except Exception as retriever_exc:
+            print(f"[ERROR] Retriever interface failed: {retriever_exc}")
+            # Fallback to direct _collection.query (may error if embedding function missing)
+            try:
+                query_result = db._collection.query(
+                    query_texts=[query],
+                    n_results=5,
+                    where=chroma_filter
+                )
+                docs = query_result.get('documents', [[]])[0]
+                metadatas = query_result.get('metadatas', [[]])[0]
+                distances = query_result.get('distances', [[]])[0]
+                results = []
+                for doc, meta, dist in zip(docs, metadatas, distances):
+                    class DocObj:
+                        def __init__(self, page_content, metadata):
+                            self.page_content = page_content
+                            self.metadata = metadata
+                    results.append((DocObj(doc, meta), dist))
+            except Exception as fallback_exc:
+                import traceback
+                print(f"[ERROR] Both retriever and direct query failed: {fallback_exc}")
+                traceback.print_exc()
+                print(f"[ERROR CONTEXT] file_id: {file_id} (type: {type(file_id)})")
+                print(f"[ERROR CONTEXT] course_id: {course_id} (type: {type(course_id)})")
+                print(f"[ERROR CONTEXT] chroma_filter: {chroma_filter}")
+                return {
+                    "answer": "Sorry, I encountered an error while processing your question. Please try again.",
+                    "sources": []
+                }
 
         # Safeguard: Only include docs with a valid file_id
         results = [(doc, score) for doc, score in results if doc.metadata.get('file_id')]
@@ -127,7 +155,12 @@ Answer:"""
         }
 
     except Exception as e:
-        print(f"Error in query_files: {e}")
+        import traceback
+        print(f"[ERROR] Exception in query_files: {e}")
+        traceback.print_exc()
+        print(f"[ERROR CONTEXT] file_id: {file_id} (type: {type(file_id)})")
+        print(f"[ERROR CONTEXT] course_id: {course_id} (type: {type(course_id)})")
+        print(f"[ERROR CONTEXT] chroma_filter: {chroma_filter}")
         return {
             "answer": "Sorry, I encountered an error while processing your question. Please try again.",
             "sources": []

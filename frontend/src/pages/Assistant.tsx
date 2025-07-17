@@ -70,6 +70,10 @@ export default function Assistant() {
   const [error, setError] = useState<string | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<'idle' | 'chat'>("idle");
+  // Scope state
+  const [selectedScope, setSelectedScope] = useState<'all' | 'course' | 'file'>('all');
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
 
   // Fetch files for scope selection and preview
   React.useEffect(() => {
@@ -83,6 +87,16 @@ export default function Assistant() {
         setFiles([]);
       });
   }, []);
+
+  // Sync legacy state with new state for backward compatibility
+  React.useEffect(() => {
+    setSelectedScope(scope as 'all' | 'course' | 'file');
+    if (scope === 'course') {
+      setSelectedCourseId(course || null);
+    } else if (scope === 'file') {
+      setSelectedFileId(file?.id ? String(file.id) : null);
+    }
+  }, [scope, course, file]);
 
   // Scroll to bottom on new message
   React.useEffect(() => {
@@ -104,8 +118,11 @@ export default function Assistant() {
     setInput("");
     // Prepare payload
     let payload: any = { query: question };
-    if (scope === "course" && course) payload.course_filter = course;
-    if (scope === "file" && file) payload.course_filter = file.filename;
+    if (selectedScope === "course" && selectedCourseId) {
+      payload.course_id = selectedCourseId;
+    } else if (selectedScope === "file" && selectedFileId) {
+      payload.file_id = selectedFileId;
+    }
     try {
       const res = await fetch("http://localhost:8000/api/assistant/query", {
         method: "POST",
@@ -154,6 +171,12 @@ export default function Assistant() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] min-h-[calc(100vh-64px)] bg-background">
+      {/* Scope label above chat */}
+      <div className="w-full text-xs text-muted-foreground px-4 pt-2 pb-1 flex items-center gap-2">
+        {selectedScope === 'all' && <span>🗂 Searching: All Files</span>}
+        {selectedScope === 'course' && selectedCourseId && <span>📘 Searching: {selectedCourseId}</span>}
+        {selectedScope === 'file' && selectedFileId && <span>📄 Searching: File #{selectedFileId}</span>}
+      </div>
       {/* Chat area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {mode === "idle" && messages.length === 0 ? (

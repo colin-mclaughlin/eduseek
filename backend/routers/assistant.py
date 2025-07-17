@@ -14,6 +14,8 @@ from routers.files import get_db
 class QueryRequest(BaseModel):
     query: str
     course_filter: Optional[str] = None
+    course_id: Optional[str] = None
+    file_id: Optional[str] = None
 
 router = APIRouter(prefix="/api/assistant", tags=["Assistant"])
 
@@ -48,9 +50,18 @@ def query_assistant(request: QueryRequest, db: Session = Depends(get_db)):
     """
     Query the assistant with a question about uploaded files.
     Args:
-        request: QueryRequest containing query and optional course_filter
+        request: QueryRequest containing query and optional course_filter, course_id, file_id
     Returns:
         JSON response with answer and sources
+    Example payloads:
+        {
+            "query": "Summarize labs",
+            "course_id": "cisc235"
+        }
+        {
+            "query": "What is in this file?",
+            "file_id": "123"
+        }
     """
     try:
         # Try to get user_id and course_id from the most recent file (or use a better strategy as needed)
@@ -59,7 +70,13 @@ def query_assistant(request: QueryRequest, db: Session = Depends(get_db)):
         course_id = getattr(file_entry, 'course_id', None) if file_entry else None
         print(f"[AssistantRouter] Using user_id={user_id}, course_id={course_id} for query filter.")
         print(f"[AssistantRouter] Query: {request.query}")
-        result = query_files(request.query, request.course_filter, user_id=user_id, course_id=course_id)
+        result = query_files(
+            request.query,
+            request.course_filter,
+            user_id=user_id,
+            course_id=request.course_id or course_id,
+            file_id=request.file_id
+        )
         return JSONResponse(content=result)
     except Exception as e:
         print(f"[AssistantRouter] Error: {e}")
