@@ -4,7 +4,15 @@ import FileCard from "../components/FileCard";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { Search } from "lucide-react";
+import { Search, LayoutGrid, List as ListIcon } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetClose,
+} from "../components/ui/sheet";
 
 interface FileData {
   id: number;
@@ -24,6 +32,9 @@ export default function Files() {
   const [answer, setAnswer] = useState("");
   const [asking, setAsking] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+  const [previewFile, setPreviewFile] = useState<FileData | null>(null);
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   const fetchFiles = useCallback(() => {
     setLoading(true);
@@ -101,6 +112,12 @@ export default function Files() {
     fetchFiles();
   }, [fetchFiles]);
 
+  // Handle file card click for preview
+  const handlePreview = (file: FileData) => {
+    setPreviewFile(file);
+    setIsSheetOpen(true);
+  };
+
   return (
     <div className="max-w-4xl mx-auto p-6">
       {/* File Upload Section */}
@@ -108,9 +125,9 @@ export default function Files() {
         <FileUploader onUploadSuccess={fetchFiles} />
       </div>
 
-      {/* Search Bar */}
-      <div className="mb-6">
-        <div className="relative">
+      {/* Search Bar & View Toggle */}
+      <div className="mb-6 flex items-center justify-between">
+        <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
           <Input
             value={searchQuery}
@@ -118,34 +135,103 @@ export default function Files() {
             placeholder="Search files by name or content..."
             className="pl-10"
           />
+          {searchQuery && (
+            <p className="text-sm text-muted-foreground mt-2">
+              Found {filteredFiles.length} file{filteredFiles.length !== 1 ? 's' : ''}
+            </p>
+          )}
         </div>
-        {searchQuery && (
-          <p className="text-sm text-muted-foreground mt-2">
-            Found {filteredFiles.length} file{filteredFiles.length !== 1 ? 's' : ''}
-          </p>
-        )}
+        <div className="ml-4 flex gap-2">
+          <Button
+            variant={viewMode === 'list' ? 'default' : 'outline'}
+            size="icon"
+            aria-label="List view"
+            onClick={() => setViewMode('list')}
+          >
+            <ListIcon className="h-5 w-5" />
+          </Button>
+          <Button
+            variant={viewMode === 'grid' ? 'default' : 'outline'}
+            size="icon"
+            aria-label="Grid view"
+            onClick={() => setViewMode('grid')}
+          >
+            <LayoutGrid className="h-5 w-5" />
+          </Button>
+        </div>
       </div>
 
-      {/* Files List */}
+      {/* Files List/Grid */}
       {loading ? (
         <div className="text-center text-muted-foreground mt-8">Loading files...</div>
       ) : error ? (
         <div className="text-center text-red-500 mt-8">{error}</div>
       ) : filteredFiles.length === 0 ? (
         <div className="text-center text-muted-foreground mt-8">No files uploaded yet.</div>
+      ) : viewMode === 'grid' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+          {filteredFiles.map((file) => (
+            <div key={file.id} onClick={() => handlePreview(file)} className="cursor-pointer">
+              <FileCard
+                file={file}
+                onSummarize={handleSummarize}
+                onDelete={handleDelete}
+                summarizingId={summarizingId}
+              />
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="space-y-4">
           {filteredFiles.map((file) => (
-            <FileCard
-              key={file.id}
-              file={file}
-              onSummarize={handleSummarize}
-              onDelete={handleDelete}
-              summarizingId={summarizingId}
-            />
+            <div key={file.id} onClick={() => handlePreview(file)} className="cursor-pointer">
+              <FileCard
+                file={file}
+                onSummarize={handleSummarize}
+                onDelete={handleDelete}
+                summarizingId={summarizingId}
+              />
+            </div>
           ))}
         </div>
       )}
+
+      {/* File Preview Drawer */}
+      <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
+        <SheetContent side="right" className="max-w-md w-full">
+          <SheetHeader>
+            <SheetTitle>{previewFile?.filename}</SheetTitle>
+            <SheetDescription>
+              {/* Add file details here */}
+              <div className="mt-2">
+                <div className="text-xs text-muted-foreground mb-2">
+                  Uploaded {previewFile?.uploaded_at}
+                </div>
+                <div className="mb-4">
+                  <strong>Summary:</strong>
+                  <div className="mt-1 whitespace-pre-line text-sm">
+                    {previewFile?.summary || 'No summary available.'}
+                  </div>
+                </div>
+                <div className="mb-4">
+                  <strong>Deadlines:</strong>
+                  <ul className="list-disc pl-5 text-sm">
+                    {(previewFile?.deadlines ?? []).map((d, i) => (
+                      <li key={i}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="mb-2 text-xs">
+                  <span className="font-medium">Type:</span> {previewFile?.filename.split('.').pop()?.toUpperCase()}
+                </div>
+              </div>
+            </SheetDescription>
+          </SheetHeader>
+          <SheetClose asChild>
+            <Button className="mt-4 w-full" variant="outline">Close</Button>
+          </SheetClose>
+        </SheetContent>
+      </Sheet>
 
       {/* Q&A Section */}
       <div className="mt-12 border-t pt-8">
