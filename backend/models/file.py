@@ -11,6 +11,7 @@ class File(Base):
     text = Column(Text)
     summary = Column(Text)
     deadlines = Column(ARRAY(String), nullable=False, default=list)
+    tags = Column(ARRAY(String), nullable=False, default=list)
     uploaded_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     # user_id = Column(Integer, ForeignKey("users.id"))  # <-- COMMENTED FOR NOW

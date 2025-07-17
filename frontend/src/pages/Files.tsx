@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import FileUploader from "../components/FileUploader";
-import FileCard from "../components/FileCard";
+import FileCard from "../components/FileCard.tsx";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -24,8 +24,9 @@ interface FileData {
   deadline: string | null;
   deadlines?: string[];
   uploaded_at?: string;
-  size?: number; // Added for preview
-  source?: string; // Added for preview
+  size?: number;
+  source?: string;
+  tags?: string[];
 }
 
 export default function Files() {
@@ -278,6 +279,24 @@ export default function Files() {
                       {previewFile.summary || 'No summary available.'}
                     </div>
                   </div>
+                  
+                  {/* Tags */}
+                  {previewFile.tags && previewFile.tags.length > 0 && (
+                    <div className="mb-4">
+                      <strong>Tags:</strong>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {previewFile.tags.map((tag, i) => (
+                          <span
+                            key={i}
+                            className="bg-muted text-xs px-2 py-1 rounded-full text-muted-foreground"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
                   {/* Deadlines */}
                   <div className="mb-4">
                     <strong>Deadlines:</strong>

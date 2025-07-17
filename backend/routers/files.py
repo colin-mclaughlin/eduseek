@@ -20,6 +20,7 @@ import os
 import re
 from datetime import datetime
 from dateutil import parser
+from collections import Counter
 
 router = APIRouter()
 
@@ -85,6 +86,59 @@ def extract_dates_from_text(text: str) -> list[str]:
     print(f"[deadline-extract] Final extracted dates: {unique_dates}")
     return unique_dates
 
+def extract_tags_from_text(text: str, summary: str) -> List[str]:
+    """
+    Extract relevant tags from text and summary using regex patterns and keyword analysis.
+    """
+    
+    tags = set()
+    
+    # Combine text and summary for analysis
+    combined_text = f"{text} {summary}".lower()
+    
+    # Extract course codes (e.g., CISC 235, MATH 101, etc.)
+    course_patterns = [
+        r"\bA-Z]{2,4}\s+\d{3,4}\b",  # CISC 23511, etc.
+        r"\bA-Z]{2,4}\d{3,4}\b",     # CISC235 MATH101, etc.
+    ]
+    
+    for pattern in course_patterns:
+        matches = re.findall(pattern, f"{text} {summary}", re.IGNORECASE)
+        for match in matches:
+            # Clean up the match
+            clean_match = re.sub(r'\s+', ' ', match.strip())
+            tags.add(clean_match.upper())
+    
+    # Extract key academic terms
+    academic_terms = [
+        'assignment', 'homework', 'project', 'quiz', 'exam', 'test', 'midterm', 'final',
+        'lecture', 'lab', 'tutorial', 'workshop', 'seminar', 'presentation', 'paper',
+        'essay', 'report', 'research', 'analysis', 'algorithm', 'data structure',
+        'recursion', 'object-oriented', 'database', 'network', 'security', 'web',
+        'machine learning', 'artificial intelligence', 'programming', 'software',
+        'hardware', 'operating system', 'compiler', 'interpreter', 'debugging',
+        'testing', 'deployment', 'version control', 'git', 'agile', 'scrum'
+    ]
+    
+    # Find academic terms in the text
+    for term in academic_terms:
+        if term.lower() in combined_text:
+            # Capitalize first letter for display
+            tags.add(term.title())
+    
+    # Extract capitalized words that might be important (simple heuristic)
+    words = re.findall(r"\b[A-Z][a-z]{2,}\b", f"{text} {summary}")
+    word_counts = Counter(words)
+    
+    # Add the most frequent capitalized words (excluding common words)
+    common_words = {'The', 'This', 'That', 'With', 'From', 'When', 'Where', 'What', 'How', 'Why'}
+    for word, count in word_counts.most_common(5):
+        if word not in common_words and len(word) > 3:
+            tags.add(word)
+    
+    # Limit to top 6 tags
+    return list(tags)[:6]
+
 def get_db():
     db = SessionLocal()
     try:
@@ -132,8 +186,14 @@ async def summarize_file(file_id: str, db: Session = Depends(get_db)):
         print(f"📅 Extracted deadlines from text: {deadlines_from_text}")
         print(f"📅 Extracted deadlines from summary: {deadlines_from_summary}")
         print(f"📅 Combined unique deadlines: {all_deadlines}")
+        
+        # Extract tags from text and summary
+        tags = extract_tags_from_text(text, summary)
+        print(f"🏷️ Extracted tags: {tags}")
+        
         file_entry.summary = summary
         file_entry.deadlines = all_deadlines
+        file_entry.tags = tags
         db.commit()
         db.refresh(file_entry)
         return file_entry
@@ -189,7 +249,8 @@ def get_files(db: Session = Depends(get_db)):
                 filename=f.filename,
                 summary=f.summary,
                 deadline=deadline,
-                deadlines=f.deadlines or []
+                deadlines=f.deadlines or [],
+                tags=f.tags or []
             ))
         return result
     except Exception as e:
@@ -308,7 +369,8 @@ def update_file(file_id: int, request: UpdateFileRequest, db: Session = Depends(
             filename=file_entry.filename,
             summary=file_entry.summary,
             deadline=deadline,
-            deadlines=file_entry.deadlines or []
+            deadlines=file_entry.deadlines or [],
+            tags=file_entry.tags or []
         )
         
     except HTTPException:

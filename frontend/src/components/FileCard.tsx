@@ -27,6 +27,7 @@ interface FileData {
   uploaded_at?: string;
   size?: number;
   source?: string;
+  tags?: string[];
 }
 
 interface FileCardProps {
@@ -120,6 +121,11 @@ export const FileCard: React.FC<FileCardProps> = ({
   const deadlines = file.deadlines || (file.deadline ? [file.deadline] : []);
   const displayDeadlines = deadlines.slice(0, 3);
   const remainingCount = deadlines.length - 3;
+
+  // Handle tags display
+  const tags = file.tags || [];
+  const displayTags = tags.slice(0, 3);
+  const remainingTags = tags.length - 3;
 
   const handleDelete = async () => {
     setIsDeleting(true);
@@ -216,6 +222,25 @@ export const FileCard: React.FC<FileCardProps> = ({
           <p className="text-xs text-muted-foreground mt-1">
             Uploaded {uploadTime}
           </p>
+          
+          {/* Tags Display */}
+          {displayTags.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {displayTags.map((tag, index) => (
+                <span
+                  key={index}
+                  className="bg-muted text-xs px-2 py-0.5 rounded-full text-muted-foreground"
+                >
+                  {tag}
+                </span>
+              ))}
+              {remainingTags > 0 && (
+                <span className="bg-muted text-xs px-2 py-0.5 rounded-full text-muted-foreground">
+                  +{remainingTags} more
+                </span>
+              )}
+            </div>
+          )}
         </div>
         {/* Dropdown Menu */}
         <DropdownMenu>
