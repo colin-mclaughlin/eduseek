@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, ARRAY
 from core.database import Base
 import datetime
 
@@ -10,7 +10,7 @@ class File(Base):
     filename = Column(String, nullable=False)
     text = Column(Text)
     summary = Column(Text)
-    deadlines = Column(Text)
+    deadlines = Column(ARRAY(String), nullable=False, default=list)
     uploaded_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     # user_id = Column(Integer, ForeignKey("users.id"))  # <-- COMMENTED FOR NOW

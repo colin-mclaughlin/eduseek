@@ -8,6 +8,7 @@ interface FileData {
   filename: string;
   summary: string | null;
   deadline: string | null;
+  deadlines: string[];
 }
 
 function formatDeadline(deadline: string | null): string | null {
@@ -86,7 +87,12 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
   }
 
   const summarizedFiles = files.filter(f => f.summary).length;
-  const upcomingDeadlines = files.filter(f => f.deadline && new Date(f.deadline) > new Date()).length;
+  const upcomingDeadlines = files
+    .flatMap(file => file.deadlines)
+    .map(date => new Date(date))
+    .filter(date => date > new Date())
+    .sort((a, b) => a.getTime() - b.getTime());
+  const upcomingDeadlinesCount = upcomingDeadlines.length;
 
   if (files.length === 0) {
     return (
@@ -145,9 +151,9 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{upcomingDeadlines}</div>
+            <div className="text-3xl font-bold">{upcomingDeadlinesCount}</div>
             <p className="text-sm text-muted-foreground mt-1">
-              {upcomingDeadlines === 1 ? "deadline" : "deadlines"}
+              {upcomingDeadlinesCount === 1 ? "deadline" : "deadlines"}
             </p>
           </CardContent>
         </Card>
@@ -183,6 +189,35 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
             <div className="mt-4 text-sm text-muted-foreground bg-gray-100 p-4 rounded-lg border">
               💡 {suggestion}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Upcoming Deadlines Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            📅 Upcoming Deadlines
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {upcomingDeadlines.length > 0 ? (
+            <ul className="space-y-2">
+              {upcomingDeadlines.slice(0, 5).map((date, index) => (
+                <li key={index} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-b-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{date.toLocaleDateString()}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {files.find(f => f.deadlines.includes(date.toISOString().split('T')[0]))?.filename || 'Unknown file'}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              No upcoming deadlines found in your files.
+            </p>
           )}
         </CardContent>
       </Card>

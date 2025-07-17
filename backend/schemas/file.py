@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from uuid import UUID
 from datetime import datetime
+from typing import Optional, List
 
 class FileBase(BaseModel):
     id: UUID
@@ -19,7 +20,8 @@ class FileOut(BaseModel):
     id: int
     filename: str
     summary: str | None = None
-    deadline: str | None = None  # ISO 8601 string or None
+    deadline: str | None = None  # ISO 8601 string or None (keeping for backward compatibility)
+    deadlines: List[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True 

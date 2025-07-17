@@ -17,8 +17,73 @@ from sqlalchemy import select
 from pathlib import Path
 import openai
 import os
+import re
+from datetime import datetime
+from dateutil import parser
 
 router = APIRouter()
+
+def extract_dates_from_text(text: str) -> list[str]:
+    """
+    Extract academic deadlines from text using comprehensive regex patterns.
+    Handles various formats like "due on January 26, 2024", "Quiz on Feb 2", etc.
+    """
+    # Define comprehensive patterns for academic deadline detection
+    patterns = [
+        # "due on <Month> <Day>[, <Year>]"
+        r"\b(?:due|deadline|assignment|project|quiz|test|exam|midterm|final)\s+(?:on|by|is|will\s+be)\s+(?:the\s+)?(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[.,]?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?\b",
+        
+        # "<event> on <Month> <Day>[, <Year>]"
+        r"\b(?:assignment|project|quiz|test|exam|midterm|final|review|session|class|lecture|lab|workshop|presentation)\s+(?:on|held\s+on|scheduled\s+for)\s+(?:the\s+)?(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[.,]?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?\b",
+        
+        # "<Month> <Day>[, <Year>]" (standalone dates)
+        r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[.,]?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?\b",
+        
+        # "<Day> <Month>[, <Year>]" (day first format)
+        r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[.,]?\s*(?:\d{4})?\b"
+    ]
+    
+    matches = []
+    for pattern in patterns:
+        matches.extend(re.findall(pattern, text, flags=re.IGNORECASE))
+    
+    # Remove duplicates while preserving order
+    unique_matches = []
+    for match in matches:
+        if match not in unique_matches:
+            unique_matches.append(match)
+    
+    parsed_dates = []
+    current_year = datetime.now().year
+    
+    for match in unique_matches:
+        try:
+            # Create a default date for parsing (current year if year is missing)
+            default_date = datetime(current_year, 1, 1)
+            
+            # Parse the date with fuzzy parsing
+            parsed_date = parser.parse(match, fuzzy=True, default=default_date)
+            
+            # If the parsed date is in the past relative to default, assume next year
+            if parsed_date.year == current_year and parsed_date < datetime.now():
+                parsed_date = parsed_date.replace(year=current_year + 1)
+            
+            # Only include future dates
+            if parsed_date >= datetime.now():
+                iso_date = parsed_date.date().isoformat()
+                parsed_dates.append(iso_date)
+                print(f"[deadline-extract] Matched: {match} → Parsed: {iso_date}")
+            
+        except Exception as e:
+            print(f"[deadline-extract] Failed to parse '{match}': {e}")
+            continue
+    
+    # Remove duplicates and sort
+    unique_dates = list(dict.fromkeys(parsed_dates))
+    unique_dates.sort()
+    
+    print(f"[deadline-extract] Final extracted dates: {unique_dates}")
+    return unique_dates
 
 def get_db():
     db = SessionLocal()
@@ -58,7 +123,17 @@ async def summarize_file(file_id: str, db: Session = Depends(get_db)):
         text = extract_text_from_file(file_path)
         chunks = chunk_text(text)
         summary = summarize_chunks(chunks)
+        # Extract deadlines from both the original text and summary for better coverage
+        deadlines_from_text = extract_dates_from_text(text)
+        deadlines_from_summary = extract_dates_from_text(summary)
+        # Combine and deduplicate deadlines
+        all_deadlines = list(set(deadlines_from_text + deadlines_from_summary))
+        all_deadlines.sort()
+        print(f"📅 Extracted deadlines from text: {deadlines_from_text}")
+        print(f"📅 Extracted deadlines from summary: {deadlines_from_summary}")
+        print(f"📅 Combined unique deadlines: {all_deadlines}")
         file_entry.summary = summary
+        file_entry.deadlines = all_deadlines
         db.commit()
         db.refresh(file_entry)
         return file_entry
@@ -113,7 +188,8 @@ def get_files(db: Session = Depends(get_db)):
                 id=f.id,
                 filename=f.filename,
                 summary=f.summary,
-                deadline=deadline
+                deadline=deadline,
+                deadlines=f.deadlines or []
             ))
         return result
     except Exception as e:
@@ -159,4 +235,21 @@ def get_smart_suggestion(db: Session = Depends(get_db)):
         return {"suggestion": suggestion}
     except Exception as e:
         print(f"Suggestion generation failed: {e}")
-        return {"suggestion": "Could not generate a suggestion right now."} 
+        return {"suggestion": "Could not generate a suggestion right now."}
+
+@router.post("/test-deadline-extraction")
+def test_deadline_extraction(request: dict):
+    """
+    Test endpoint for deadline extraction. Send a JSON with 'text' field.
+    Example: {"text": "Assignment 1 is due on January 26, 2024. Quiz 1 will be held on Feb 2."}
+    """
+    text = request.get("text", "")
+    if not text:
+        return {"error": "No text provided"}
+    
+    deadlines = extract_dates_from_text(text)
+    return {
+        "input_text": text,
+        "extracted_deadlines": deadlines,
+        "count": len(deadlines)
+    } 
