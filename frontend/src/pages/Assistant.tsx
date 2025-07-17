@@ -6,6 +6,15 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetCl
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 dayjs.extend(relativeTime);
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "../components/ui/select";
+import UserMessageBubble from "../components/UserMessageBubble";
+import EduSeekResponseBubble from "../components/EduSeekResponseBubble";
 
 interface SourceChunk {
   file_id: string;
@@ -60,6 +69,7 @@ export default function Assistant() {
   const [previewFile, setPreviewFile] = useState<FileData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const [mode, setMode] = useState<'idle' | 'chat'>("idle");
 
   // Fetch files for scope selection and preview
   React.useEffect(() => {
@@ -83,6 +93,7 @@ export default function Assistant() {
     if (!question.trim()) return;
     setError(null);
     setLoading(true);
+    setMode("chat");
     const userMsg: ChatMessage = {
       id: Math.random().toString(36).slice(2),
       role: "user",
@@ -128,7 +139,8 @@ export default function Assistant() {
   };
 
   const handlePromptClick = (prompt: string) => {
-    setInput(prompt);
+    setInput("");
+    setMode("chat");
     handleSend(prompt);
   };
 
@@ -141,36 +153,71 @@ export default function Assistant() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto flex flex-col h-[calc(100vh-4rem)] pt-6 pb-2 px-2">
-      <h1 className="text-2xl font-bold mb-2 flex items-center gap-2">
-        <span role="img" aria-label="bot">🤖</span> EduSeek Assistant
-      </h1>
-      <div className="mb-3 flex flex-wrap gap-2">
-        {SUGGESTED_QUESTIONS.map((q, i) => (
-          <Button key={i} variant="outline" size="sm" onClick={() => handlePromptClick(q)} disabled={loading}>
-            {q}
-          </Button>
-        ))}
+    <div className="flex flex-col h-[calc(100vh-64px)] min-h-[calc(100vh-64px)] bg-background">
+      {/* Chat area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {mode === "idle" && messages.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center h-full gap-4 text-muted-foreground select-none">
+            <div className="text-2xl font-bold mb-4 flex items-center gap-2">
+              <span role="img" aria-label="bot">🤖</span> EduSeek Assistant
+            </div>
+            <div className="flex flex-col gap-3 w-full max-w-xs">
+              {SUGGESTED_QUESTIONS.map((q, i) => (
+                <Button key={i} variant="outline" size="lg" className="w-full" onClick={() => handlePromptClick(q)} disabled={loading}>
+                  {q}
+                </Button>
+              ))}
+            </div>
+            <div className="mt-8 text-sm text-center opacity-60">Ask EduSeek anything about your files to get started!</div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto px-0 py-4 flex flex-col-reverse" style={{scrollbarGutter: 'stable'}}>
+            <div ref={chatBottomRef} />
+            {messages.slice().reverse().map((msg) =>
+              msg.role === "user" ? (
+                <UserMessageBubble
+                  key={msg.id}
+                  content={msg.content}
+                  timestamp={dayjs(msg.timestamp).fromNow()}
+                />
+              ) : (
+                <EduSeekResponseBubble
+                  key={msg.id}
+                  content={msg.content}
+                  timestamp={dayjs(msg.timestamp).fromNow()}
+                  sources={msg.sources}
+                  onOpenFile={handleOpenFile}
+                />
+              )
+            )}
+          </div>
+        )}
       </div>
-      {/* Scope Selector */}
-      <div className="mb-4 flex items-center gap-3">
-        <span className="text-sm font-medium">Search scope:</span>
-        <div className="flex gap-2">
-          {SCOPE_OPTIONS.map(opt => (
-            <Button
-              key={opt.value}
-              variant={scope === opt.value ? "default" : "outline"}
-              size="sm"
-              onClick={() => setScope(opt.value)}
-              disabled={loading}
-            >
-              {opt.label}
-            </Button>
-          ))}
-        </div>
+      {/* Error */}
+      {error && <div className="text-red-500 text-sm mb-2 text-center">{error}</div>}
+      {/* Input Bar */}
+      <form
+        className="flex items-center gap-2 border-t p-3 bg-background sticky bottom-0 z-10"
+        onSubmit={e => {
+          e.preventDefault();
+          if (!loading && input.trim()) handleSend(input.trim());
+        }}
+      >
+        {/* Scope Dropdown */}
+        <Select value={scope} onValueChange={setScope} disabled={loading}>
+          <SelectTrigger className="w-40 min-w-[8rem]">
+            <SelectValue placeholder="Scope" />
+          </SelectTrigger>
+          <SelectContent>
+            {SCOPE_OPTIONS.map(opt => (
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {/* Course or File Select if needed */}
         {scope === "course" && (
           <Input
-            className="ml-2 w-36"
+            className="w-36"
             placeholder="Course name..."
             value={course}
             onChange={e => setCourse(e.target.value)}
@@ -178,68 +225,24 @@ export default function Assistant() {
           />
         )}
         {scope === "file" && (
-          <select
-            className="ml-2 border rounded px-2 py-1 text-sm"
-            value={file?.id || ""}
-            onChange={e => {
-              const f = files.find(f => f.id === Number(e.target.value));
+          <Select
+            value={file?.id ? String(file.id) : ""}
+            onValueChange={val => {
+              const f = files.find(f => String(f.id) === val);
               setFile(f || null);
             }}
             disabled={loading}
           >
-            <option value="">Select file...</option>
-            {files.map(f => (
-              <option key={f.id} value={f.id}>{f.filename}</option>
-            ))}
-          </select>
+            <SelectTrigger className="w-44 min-w-[10rem]">
+              <SelectValue placeholder="Select file..." />
+            </SelectTrigger>
+            <SelectContent>
+              {files.map(f => (
+                <SelectItem key={f.id} value={String(f.id)}>{f.filename}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         )}
-      </div>
-      {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto bg-muted/50 rounded-lg p-4 mb-2 border">
-        {messages.length === 0 && (
-          <div className="text-center text-muted-foreground mt-16">Ask EduSeek anything about your files to get started!</div>
-        )}
-        {messages.map((msg, i) => (
-          <div key={msg.id} className={`flex mb-4 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div className={`max-w-[75%] rounded-lg px-4 py-2 shadow-sm ${msg.role === "user" ? "bg-primary text-primary-foreground rounded-br-none" : "bg-muted rounded-bl-none"}`}>
-              <div className="text-sm whitespace-pre-line">{msg.content}</div>
-              <div className="text-xs text-muted-foreground mt-1 text-right">
-                {dayjs(msg.timestamp).fromNow()}
-              </div>
-              {/* Source highlights for assistant */}
-              {msg.role === "assistant" && msg.sources && msg.sources.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {msg.sources.map((src, j) => (
-                    <div key={j} className="p-2 bg-muted-foreground/10 rounded border text-xs">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium">📄 From: {src.filename}</span>
-                        <Button variant="link" size="sm" className="px-1 py-0 h-6" onClick={() => handleOpenFile(src.filename)}>
-                          Open file
-                        </Button>
-                        {typeof src.similarity === "number" && (
-                          <span className="ml-auto text-[10px] text-muted-foreground">sim: {src.similarity}</span>
-                        )}
-                      </div>
-                      <code className="block text-muted-foreground bg-background rounded p-1 overflow-x-auto">{src.chunk_text}</code>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        <div ref={chatBottomRef} />
-      </div>
-      {/* Error */}
-      {error && <div className="text-red-500 text-sm mb-2">{error}</div>}
-      {/* Input Bar */}
-      <form
-        className="flex gap-2 items-center border-t pt-3 bg-background sticky bottom-0"
-        onSubmit={e => {
-          e.preventDefault();
-          if (!loading && input.trim()) handleSend(input.trim());
-        }}
-      >
         <Input
           className="flex-1"
           placeholder="Ask EduSeek anything about your files..."
@@ -248,8 +251,8 @@ export default function Assistant() {
           disabled={loading}
           autoFocus
         />
-        <Button type="submit" disabled={loading || !input.trim()}>
-          {loading ? <span className="animate-spin mr-2">⏳</span> : null} Ask
+        <Button type="submit" disabled={loading || !input.trim()} className="gap-2">
+          {loading && <span className="animate-spin">⏳</span>} Ask
         </Button>
       </form>
       {/* File Preview Drawer */}

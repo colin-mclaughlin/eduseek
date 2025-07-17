@@ -31,3 +31,6 @@ backend/uploads/
 # Python venv (if not already ignored)
 .venv/
 venv/ 
+
+# Ignore ChromaDB persistence files
+backend/chroma_db/
