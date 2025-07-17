@@ -13,6 +13,9 @@ import {
   SheetDescription,
   SheetClose,
 } from "../components/ui/sheet";
+import dayjs from "dayjs";
+import relativeTime from "dayjs/plugin/relativeTime";
+dayjs.extend(relativeTime);
 
 interface FileData {
   id: number;
@@ -21,6 +24,8 @@ interface FileData {
   deadline: string | null;
   deadlines?: string[];
   uploaded_at?: string;
+  size?: number; // Added for preview
+  source?: string; // Added for preview
 }
 
 export default function Files() {
@@ -35,6 +40,11 @@ export default function Files() {
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [previewFile, setPreviewFile] = useState<FileData | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const [renamedFiles, setRenamedFiles] = useState<Record<number, string>>({});
+  // Per-file ask state
+  const [fileAsk, setFileAsk] = useState("");
+  const [fileAnswer, setFileAnswer] = useState("");
+  const [fileAsking, setFileAsking] = useState(false);
 
   const fetchFiles = useCallback(() => {
     setLoading(true);
@@ -95,6 +105,30 @@ export default function Files() {
       setAnswer("Query failed: " + (await res.text()));
     }
     setAsking(false);
+  };
+
+  // Handle rename in local state
+  const handleRename = (id: number, newName: string) => {
+    setRenamedFiles(prev => ({ ...prev, [id]: newName }));
+    setFiles(prev => prev.map(f => (f.id === id ? { ...f, filename: newName } : f)));
+  };
+
+  // Per-file ask handler
+  const handleFileAsk = async (file: FileData) => {
+    setFileAsking(true);
+    setFileAnswer("");
+    const res = await fetch("http://localhost:8000/api/files/query/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: fileAsk, file_id: file.id }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setFileAnswer(data.answer);
+    } else {
+      setFileAnswer("Query failed: " + (await res.text()));
+    }
+    setFileAsking(false);
   };
 
   // Filter files based on search query
@@ -171,12 +205,14 @@ export default function Files() {
       ) : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
           {filteredFiles.map((file) => (
-            <div key={file.id} onClick={() => handlePreview(file)} className="cursor-pointer">
+            <div key={file.id}>
               <FileCard
-                file={file}
+                file={{ ...file, filename: renamedFiles[file.id] || file.filename }}
                 onSummarize={handleSummarize}
                 onDelete={handleDelete}
                 summarizingId={summarizingId}
+                onPreview={handlePreview}
+                onRename={handleRename}
               />
             </div>
           ))}
@@ -184,12 +220,14 @@ export default function Files() {
       ) : (
         <div className="space-y-4">
           {filteredFiles.map((file) => (
-            <div key={file.id} onClick={() => handlePreview(file)} className="cursor-pointer">
+            <div key={file.id}>
               <FileCard
-                file={file}
+                file={{ ...file, filename: renamedFiles[file.id] || file.filename }}
                 onSummarize={handleSummarize}
                 onDelete={handleDelete}
                 summarizingId={summarizingId}
+                onPreview={handlePreview}
+                onRename={handleRename}
               />
             </div>
           ))}
@@ -200,31 +238,79 @@ export default function Files() {
       <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
         <SheetContent side="right" className="max-w-md w-full">
           <SheetHeader>
-            <SheetTitle>{previewFile?.filename}</SheetTitle>
+            <SheetTitle>
+              {previewFile ? (renamedFiles[previewFile.id] || previewFile.filename) : ''}
+            </SheetTitle>
             <SheetDescription>
-              {/* Add file details here */}
-              <div className="mt-2">
-                <div className="text-xs text-muted-foreground mb-2">
-                  Uploaded {previewFile?.uploaded_at}
-                </div>
-                <div className="mb-4">
-                  <strong>Summary:</strong>
-                  <div className="mt-1 whitespace-pre-line text-sm">
-                    {previewFile?.summary || 'No summary available.'}
+              {previewFile && (
+                <div className="mt-2 space-y-4">
+                  {/* Metadata */}
+                  <div className="flex flex-col gap-1 text-xs text-muted-foreground mb-2">
+                    <div>
+                      <span className="font-medium">Uploaded:</span> {previewFile.uploaded_at ? dayjs(previewFile.uploaded_at).fromNow() : 'Unknown'}
+                    </div>
+                    {previewFile.size && (
+                      <div>
+                        <span className="font-medium">Size:</span> {Math.round(previewFile.size / 1024)} KB
+                      </div>
+                    )}
+                    <div>
+                      <span className="font-medium">Source:</span> {previewFile.source === 'lms' ? 'Synced from LMS' : 'Uploaded manually'}
+                    </div>
+                    <div>
+                      <span className="font-medium">Deadlines:</span> {(previewFile.deadlines?.length || 0)}
+                    </div>
+                    {/* Semantic chunks stub */}
+                    <div>
+                      <span className="font-medium">Semantic Chunks:</span> <span className="italic">(not tracked)</span>
+                    </div>
+                  </div>
+                  {/* Summary */}
+                  <div className="mb-4">
+                    <strong>Summary:</strong>
+                    <div className="mt-1 whitespace-pre-line text-sm">
+                      {previewFile.summary || 'No summary available.'}
+                    </div>
+                  </div>
+                  {/* Deadlines */}
+                  <div className="mb-4">
+                    <strong>Deadlines:</strong>
+                    <ul className="list-disc pl-5 text-sm">
+                      {(previewFile.deadlines ?? []).map((d, i) => (
+                        <li key={i}>{d}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  {/* Per-file Ask */}
+                  <div className="border-t pt-4">
+                    <div className="font-semibold mb-2">Ask about this file</div>
+                    <div className="flex gap-2 mb-2">
+                      <Input
+                        value={fileAsk}
+                        onChange={e => setFileAsk(e.target.value)}
+                        placeholder="Ask a question about this file..."
+                        disabled={fileAsking}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && fileAsk.trim() && previewFile) handleFileAsk(previewFile);
+                        }}
+                      />
+                      <Button
+                        onClick={() => previewFile && handleFileAsk(previewFile)}
+                        disabled={fileAsking || !fileAsk.trim()}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                      >
+                        {fileAsking ? 'Asking...' : 'Ask'}
+                      </Button>
+                    </div>
+                    {fileAnswer && (
+                      <div className="mt-2 p-3 border rounded bg-muted/50 text-sm">
+                        <span className="font-medium text-muted-foreground">Answer:</span>
+                        <div>{fileAnswer}</div>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="mb-4">
-                  <strong>Deadlines:</strong>
-                  <ul className="list-disc pl-5 text-sm">
-                    {(previewFile?.deadlines ?? []).map((d, i) => (
-                      <li key={i}>{d}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="mb-2 text-xs">
-                  <span className="font-medium">Type:</span> {previewFile?.filename.split('.').pop()?.toUpperCase()}
-                </div>
-              </div>
+              )}
             </SheetDescription>
           </SheetHeader>
           <SheetClose asChild>
