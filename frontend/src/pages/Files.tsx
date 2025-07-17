@@ -1,14 +1,18 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import FileUploader from "../components/FileUploader";
+import FileCard from "../components/FileCard";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import { Search } from "lucide-react";
 
 interface FileData {
   id: number;
   filename: string;
   summary: string | null;
   deadline: string | null;
+  deadlines?: string[];
+  uploaded_at?: string;
 }
 
 export default function Files() {
@@ -19,6 +23,7 @@ export default function Files() {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [asking, setAsking] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchFiles = useCallback(() => {
     setLoading(true);
@@ -81,75 +86,95 @@ export default function Files() {
     setAsking(false);
   };
 
+  // Filter files based on search query
+  const filteredFiles = useMemo(() => {
+    if (!searchQuery.trim()) return files;
+    
+    const query = searchQuery.toLowerCase();
+    return files.filter(file => 
+      file.filename.toLowerCase().includes(query) ||
+      (file.summary && file.summary.toLowerCase().includes(query))
+    );
+  }, [files, searchQuery]);
+
   useEffect(() => {
     fetchFiles();
   }, [fetchFiles]);
 
   return (
-    <div>
-      <FileUploader onUploadSuccess={fetchFiles} />
+    <div className="max-w-4xl mx-auto p-6">
+      {/* File Upload Section */}
+      <div className="mb-8">
+        <FileUploader onUploadSuccess={fetchFiles} />
+      </div>
+
+      {/* Search Bar */}
+      <div className="mb-6">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search files by name or content..."
+            className="pl-10"
+          />
+        </div>
+        {searchQuery && (
+          <p className="text-sm text-muted-foreground mt-2">
+            Found {filteredFiles.length} file{filteredFiles.length !== 1 ? 's' : ''}
+          </p>
+        )}
+      </div>
+
+      {/* Files List */}
       {loading ? (
         <div className="text-center text-muted-foreground mt-8">Loading files...</div>
       ) : error ? (
         <div className="text-center text-red-500 mt-8">{error}</div>
-      ) : files.length === 0 ? (
+      ) : filteredFiles.length === 0 ? (
         <div className="text-center text-muted-foreground mt-8">No files uploaded yet.</div>
       ) : (
-        <div className="max-w-2xl mx-auto mt-8 flex flex-col gap-4">
-          {(files ?? []).map((f) => (
-            <Card key={f.id}>
-              <CardHeader>
-                <CardTitle className="text-base font-medium truncate max-w-xs" title={f.filename}>{f.filename}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-sm text-muted-foreground line-clamp-3 whitespace-pre-line mb-2">
-                  {f.summary ? f.summary.slice(0, 180) + (f.summary.length > 180 ? "..." : "") : "No summary available."}
-                </div>
-                {f.deadline && (
-                  <span className="text-xs text-amber-700 bg-amber-100 rounded px-2 py-1">Due {new Date(f.deadline).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</span>
-                )}
-                <div className="flex gap-2 mt-2">
-                  {!f.summary && (
-                    <Button
-                      size="sm"
-                      className="mt-0"
-                      disabled={summarizingId === f.id}
-                      onClick={() => handleSummarize(f)}
-                    >
-                      {summarizingId === f.id ? "Summarizing..." : "Summarize"}
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    className="bg-red-500 hover:bg-red-600 text-white mt-0"
-                    onClick={() => handleDelete(f.id)}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+        <div className="space-y-4">
+          {filteredFiles.map((file) => (
+            <FileCard
+              key={file.id}
+              file={file}
+              onSummarize={handleSummarize}
+              onDelete={handleDelete}
+              summarizingId={summarizingId}
+            />
           ))}
         </div>
       )}
-      <div className="mt-8 border-t pt-4 max-w-2xl mx-auto">
-        <h2 className="text-xl font-bold mb-2">Ask About Your Files</h2>
-        <Input
-          value={question}
-          onChange={e => setQuestion(e.target.value)}
-          placeholder="Ask a question..."
-          className="mb-2"
-          disabled={asking}
-        />
-        <Button onClick={handleAsk} disabled={asking || !question.trim()} className="bg-indigo-600 text-white px-4 py-1 rounded">
-          {asking ? "Asking..." : "Ask"}
-        </Button>
-        {answer && (
-          <div className="mt-4 p-4 border rounded bg-gray-50">
-            <p className="font-medium text-sm text-gray-600">Answer:</p>
-            <p>{answer}</p>
-          </div>
-        )}
+
+      {/* Q&A Section */}
+      <div className="mt-12 border-t pt-8">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Ask About Your Files</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Input
+              value={question}
+              onChange={e => setQuestion(e.target.value)}
+              placeholder="Ask a question about your uploaded files..."
+              disabled={asking}
+            />
+            <Button 
+              onClick={handleAsk} 
+              disabled={asking || !question.trim()} 
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              {asking ? "Asking..." : "Ask Question"}
+            </Button>
+            {answer && (
+              <div className="mt-4 p-4 border rounded-lg bg-muted/50">
+                <p className="font-medium text-sm text-muted-foreground mb-2">Answer:</p>
+                <p className="whitespace-pre-line">{answer}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
