@@ -4,11 +4,12 @@ from typing import List
 from fastapi import UploadFile
 from langchain_community.document_loaders import PyPDFLoader, UnstructuredPowerPointLoader, TextLoader, UnstructuredWordDocumentLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-import openai
-from dotenv import load_dotenv
 import traceback
 
 # Requires: pip install python-docx
+
+from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
@@ -16,6 +17,7 @@ UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 async def save_uploaded_file(file: UploadFile) -> Path:
     file_path = UPLOAD_DIR / file.filename
@@ -50,7 +52,6 @@ def chunk_text(text: str) -> List[str]:
     return splitter.split_text(text)
 
 def summarize_chunks(chunks: List[str]) -> str:
-    client = openai.Client(api_key=OPENAI_API_KEY)
     summaries = []
     for chunk in chunks:
         response = client.chat.completions.create(

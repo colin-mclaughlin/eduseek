@@ -1,5 +1,4 @@
 import os
-import openai
 from typing import List, Dict
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
@@ -7,12 +6,14 @@ from core.database import SessionLocal
 from models.deadline import Deadline, DeadlineSource
 from sqlalchemy import and_
 from uuid import UUID
+from openai import OpenAI
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+client = OpenAI(api_key=OPENAI_API_KEY)
+
 def extract_deadlines_from_text(text: str) -> List[Dict]:
-    client = openai.Client(api_key=OPENAI_API_KEY)
     prompt = (
         "Extract all assignment, quiz, test, and project deadlines with dates and titles from the following text. "
         "Return a JSON array where each item has: 'title', 'due_date' (ISO 8601 format), and 'source' (always 'file'). "

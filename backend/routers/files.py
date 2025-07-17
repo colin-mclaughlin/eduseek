@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Body
 from services.file_service import save_uploaded_file, extract_text_from_file, chunk_text, summarize_chunks
-from services.embedding_service import embed_chunks, get_or_create_chroma_collection
+from services.embedding_service import embed_chunks, get_or_create_chroma_collection, create_file_embeddings, delete_file_embeddings
 from services.deadline_service import extract_deadlines_from_text, save_deadlines
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -15,7 +15,6 @@ from typing import List
 import traceback
 from sqlalchemy import select
 from pathlib import Path
-import openai
 import os
 import re
 from datetime import datetime
@@ -155,7 +154,9 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
         file_entry = FileModel(
             filename=file.filename,
             text=text,  # <-- Save extracted text
-            summary=None
+            summary=None,
+            user_id=uuid.uuid4(),  # Generate a default user_id
+            course_id=uuid.uuid4()  # Generate a default course_id
         )
         db.add(file_entry)
         db.commit()
@@ -167,35 +168,30 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/summarize/{file_id}")
-async def summarize_file(file_id: str, db: Session = Depends(get_db)):
+async def summarize_file(file_id: int, db: Session = Depends(get_db)):
     try:
         file_entry = db.query(FileModel).filter(FileModel.id == file_id).first()
         if not file_entry:
             raise HTTPException(status_code=404, detail="File not found")
-        # Load text from file
         file_path = Path('uploads') / file_entry.filename
         text = extract_text_from_file(file_path)
         chunks = chunk_text(text)
         summary = summarize_chunks(chunks)
-        # Extract deadlines from both the original text and summary for better coverage
         deadlines_from_text = extract_dates_from_text(text)
         deadlines_from_summary = extract_dates_from_text(summary)
-        # Combine and deduplicate deadlines
         all_deadlines = list(set(deadlines_from_text + deadlines_from_summary))
         all_deadlines.sort()
-        print(f"📅 Extracted deadlines from text: {deadlines_from_text}")
-        print(f"📅 Extracted deadlines from summary: {deadlines_from_summary}")
-        print(f"📅 Combined unique deadlines: {all_deadlines}")
-        
-        # Extract tags from text and summary
         tags = extract_tags_from_text(text, summary)
-        print(f"🏷️ Extracted tags: {tags}")
-        
         file_entry.summary = summary
         file_entry.deadlines = all_deadlines
         file_entry.tags = tags
         db.commit()
         db.refresh(file_entry)
+        # Embed with user_id and course_id
+        user_id = getattr(file_entry, 'user_id', None)
+        course_id = getattr(file_entry, 'course_id', None)
+        from services.embedding_service import create_file_embeddings
+        create_file_embeddings(file_entry.id, file_entry.filename, text, user_id=user_id, course_id=course_id)
         return file_entry
     except Exception as e:
         print("SUMMARIZE ERROR:", e)
@@ -271,6 +267,11 @@ def delete_file(file_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         print(f"Error deleting file from disk: {e}")
         # Continue to delete from DB anyway
+    # Delete embeddings for this file
+    try:
+        delete_file_embeddings(file_id)
+    except Exception as e:
+        print(f"Error deleting embeddings for file_id {file_id}: {e}")
     db.delete(file)
     db.commit()
     return
