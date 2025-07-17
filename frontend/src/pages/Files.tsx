@@ -109,8 +109,14 @@ export default function Files() {
 
   // Handle rename in local state
   const handleRename = (id: number, newName: string) => {
+    // Update local state immediately for optimistic UI
     setRenamedFiles(prev => ({ ...prev, [id]: newName }));
     setFiles(prev => prev.map(f => (f.id === id ? { ...f, filename: newName } : f)));
+    
+    // Also update preview file if it's the same file
+    if (previewFile && previewFile.id === id) {
+      setPreviewFile(prev => prev ? { ...prev, filename: newName } : null);
+    }
   };
 
   // Per-file ask handler

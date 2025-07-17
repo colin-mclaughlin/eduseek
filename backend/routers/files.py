@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from core.database import SessionLocal
 from models.file import File as FileModel
 from models.deadline import Deadline
-from schemas.file import FileOut
+from schemas.file import FileOut, UpdateFileRequest
 from fastapi import Depends
 from typing import List
 import traceback
@@ -253,3 +253,67 @@ def test_deadline_extraction(request: dict):
         "extracted_deadlines": deadlines,
         "count": len(deadlines)
     } 
+
+@router.patch("/{file_id}")
+def update_file(file_id: int, request: UpdateFileRequest, db: Session = Depends(get_db)):
+    try:
+        # Validate filename
+        if not request.filename.strip():
+            raise HTTPException(status_code=400, detail="Filename cannot be empty")
+        
+        filename = request.filename.strip()
+        
+        # Check if file exists
+        file_entry = db.query(FileModel).filter(FileModel.id == file_id).first()
+        if not file_entry:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Check for duplicate filenames (optional)
+        existing_file = db.query(FileModel).filter(
+            FileModel.filename == filename,
+            FileModel.id != file_id
+        ).first()
+        if existing_file:
+            raise HTTPException(status_code=490, detail="A file with this name already exists")
+        
+        # Update filename
+        old_filename = file_entry.filename
+        file_entry.filename = filename
+        
+        # Update the actual file on disk if it exists
+        old_file_path = Path('uploads') / old_filename
+        new_file_path = Path('uploads') / filename
+        
+        if old_file_path.exists():
+            try:
+                old_file_path.rename(new_file_path)
+            except Exception as e:
+                print(f"Error renaming file on disk: {e}")
+                # Continue with DB update anyway
+        
+        db.commit()
+        db.refresh(file_entry)
+        
+        # Return updated file in FileOut format
+        deadline_obj = (
+            db.query(Deadline)
+            .filter(Deadline.file_id == file_entry.id)
+            .order_by(Deadline.due_date.asc())
+            .first()
+        )
+        deadline = deadline_obj.due_date.isoformat() if deadline_obj else None
+        
+        return FileOut(
+            id=file_entry.id,
+            filename=file_entry.filename,
+            summary=file_entry.summary,
+            deadline=deadline,
+            deadlines=file_entry.deadlines or []
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"UPDATE FILE ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to update file") 

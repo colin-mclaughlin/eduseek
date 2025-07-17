@@ -14,6 +14,7 @@ import {
 import { MoreVertical, Trash2, Calendar, Download, Pencil, Eye, Globe } from "lucide-react";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
+import { cn } from "../lib/utils";
 
 dayjs.extend(relativeTime);
 
@@ -63,10 +64,32 @@ const formatDeadline = (deadline: string): string => {
   return date.format('MMM D');
 };
 
-// Stub for future backend integration
-const saveRenamedFile = (id: number, newName: string) => {
-  // TODO: Integrate with backend
-  return Promise.resolve();
+// Update the saveRenamedFile function to call backend
+const saveRenamedFile = async (id: number, newName: string): Promise<boolean> => {
+  try {
+    // Validate filename
+    if (!newName.trim()) {
+      throw new Error("Filename cannot be empty");
+    }
+    
+    const filename = newName.trim();
+    
+    const res = await fetch(`http://localhost:800/api/files/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename }),
+    });
+    
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.detail || "Failed to rename file");
+    }
+    
+    return true;
+  } catch (error: any) {
+    console.error("Rename error:", error);
+    throw error;
+  }
 };
 
 export const FileCard: React.FC<FileCardProps> = ({
@@ -80,7 +103,9 @@ export const FileCard: React.FC<FileCardProps> = ({
   const [showFullSummary, setShowFullSummary] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
   const [newName, setNewName] = useState(file.filename);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -103,19 +128,38 @@ export const FileCard: React.FC<FileCardProps> = ({
   };
 
   const handleRename = async () => {
-    if (newName.trim() && newName !== file.filename) {
+    if (!newName.trim() || newName === file.filename) {
+      setRenaming(false);
+      return;
+    }
+    
+    setIsRenaming(true);
+    setRenameError(null);
+    
+    try {
       await saveRenamedFile(file.id, newName);
       if (onRename) onRename(file.id, newName);
+      setRenaming(false);
+      // Show success message (you can add toast here later)
+      console.log("File renamed successfully");
+    } catch (error: any) {
+      setRenameError(error.message || "Failed to rename file");
+      setNewName(file.filename); // Revert to original name
+      setRenaming(false);
+      // Show error message (you can add toast here later)
+      console.error("Rename failed:", error.message);
+    } finally {
+      setIsRenaming(false);
     }
-    setRenaming(false);
   };
 
   const handleRenameKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !isRenaming) {
       handleRename();
     } else if (e.key === 'Escape') {
       setRenaming(false);
       setNewName(file.filename);
+      setRenameError(null);
     }
   };
 
@@ -141,15 +185,25 @@ export const FileCard: React.FC<FileCardProps> = ({
         <div className="text-2xl shrink-0">{fileIcon}</div>
         <div className="flex-1 min-w-0">
           {renaming ? (
-            <input
-              ref={inputRef}
-              className="text-base font-medium truncate bg-background border rounded px-2 py-1 w-full focus:outline-none focus:ring"
-              value={newName}
-              onChange={e => setNewName(e.target.value)}
-              onBlur={handleRename}
-              onKeyDown={handleRenameKey}
-              maxLength={128}
-            />
+            <div className="space-y-1">
+              <input
+                ref={inputRef}
+                className={cn(
+                  "text-base font-medium truncate bg-background border rounded px-2 py-1 w-full focus:outline-none focus:ring",
+                  isRenaming && "opacity-50 cursor-not-allowed",
+                  renameError && "border-red-500"
+                )}
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onBlur={handleRename}
+                onKeyDown={handleRenameKey}
+                maxLength={128}
+                disabled={isRenaming}
+              />
+              {renameError && (
+                <p className="text-xs text-red-600">{renameError}</p>
+              )}
+            </div>
           ) : (
             <CardTitle
               className="text-base font-medium truncate cursor-pointer"

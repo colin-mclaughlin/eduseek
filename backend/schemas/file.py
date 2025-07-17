@@ -16,6 +16,9 @@ class FileBase(BaseModel):
     class Config:
         orm_mode = True
 
+class UpdateFileRequest(BaseModel):
+    filename: str
+
 class FileOut(BaseModel):
     id: int
     filename: str
