@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardHeader, CardContent, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
+import LMSImportForm from "./lms/LMSImportForm";
 
 interface FileData {
   id: number;
@@ -256,6 +257,12 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
           )}
         </CardContent>
       </Card>
+
+      {/* LMS Import Section */}
+      <div>
+        <h3 className="text-lg font-semibold mb-2">Import Course Files from LMS</h3>
+        <LMSImportForm />
+      </div>
 
       {/* Quick Access Shortcuts */}
       <div className="grid grid-cols-2 gap-4">

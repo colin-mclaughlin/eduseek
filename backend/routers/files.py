@@ -20,6 +20,8 @@ import re
 from datetime import datetime
 from dateutil import parser
 from collections import Counter
+from services.lms_scraper import scrape_lms_files, LMS_TYPE
+from fastapi import status
 
 router = APIRouter()
 
@@ -225,6 +227,34 @@ def query_files(request: QueryRequest, db: Session = Depends(get_db)):
     except Exception as e:
         print(f"OpenAI error: {e}")
         raise HTTPException(status_code=500, detail="OpenAI request failed")
+
+@router.get("/files", response_model=List[FileOut])
+def get_files_explicit(db: Session = Depends(get_db)):
+    try:
+        files = db.query(FileModel).all()
+        result = []
+        for f in files:
+            # Find the soonest deadline for this file (if any)
+            deadline_obj = (
+                db.query(Deadline)
+                .filter(Deadline.file_id == f.id)
+                .order_by(Deadline.due_date.asc())
+                .first()
+            )
+            deadline = deadline_obj.due_date.isoformat() if deadline_obj else None
+            result.append(FileOut(
+                id=f.id,
+                filename=f.filename,
+                summary=f.summary,
+                deadline=deadline,
+                deadlines=f.deadlines or [],
+                tags=f.tags or []
+            ))
+        return result
+    except Exception as e:
+        print("GET FILES ERROR:", e)
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/", response_model=List[FileOut])
 def get_files(db: Session = Depends(get_db)):
