@@ -109,9 +109,20 @@ class OnQFileScraper:
                         print(f"  ⚠️ Skipping file {i}: No href attribute")
                         continue
                     
+                    # Debug: Check for any "Viiew" typo in the original URL
+                    if "Viiew" in preview_url:
+                        print(f"  ⚠️ WARNING: Found 'Viiew' typo in original URL: {preview_url}")
+                    
                     # Make URL absolute if it's relative
                     if preview_url.startswith('/'):
                         preview_url = f"{self.base_url}{preview_url}"
+                    
+                    # Debug: Check for any "Viiew" typo in the final URL
+                    if "Viiew" in preview_url:
+                        print(f"  ⚠️ WARNING: Found 'Viiew' typo in final URL: {preview_url}")
+                        # Fix the typo - Brightspace URLs are case-sensitive
+                        preview_url = preview_url.replace("Viiew", "View")
+                        print(f"  🔧 Fixed URL: {preview_url}")
                     
                     # Infer file type from URL extension
                     file_type = "Unknown"
@@ -174,13 +185,13 @@ class OnQFileScraper:
             print(f"❌ Error extracting file links: {e}")
             return files
     
-    async def get_download_url(self, preview_url: str) -> Optional[str]:
-        """Visit the preview page and extract the download URL."""
+    async def get_download_url(self, preview_url: str, file_title: str = "Unknown") -> Optional[str]:
+        """Visit the preview page and extract the download URL by clicking the download button."""
         try:
-            print(f"🔗 Getting download URL for: {preview_url}")
+            print(f"🔗 Getting download URL for: {file_title}")
             
             # Navigate to preview page
-            await self.page.goto(preview_url)
+            await self.page.goto(preview_url, wait_until="load", timeout=15000)
             await self.page.wait_for_load_state("networkidle")
             
             # Wait for the viewer to load
@@ -190,41 +201,52 @@ class OnQFileScraper:
             await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await asyncio.sleep(1)
             
-            # Look for download button with various selectors
-            download_selectors = [
-                'a[href*="/content/enforced/"]',
-                'a[href*="download"]',
-                'button[aria-label*="Download"]',
-                'a[aria-label*="Download"]',
+            # Try multiple download button selectors
+            selectors = [
+                'button.d2l-button:has-text("Download")',
+                'button:has-text("Download")',
+                'a:has-text("Download")',
+                '[aria-label*="Download"]',
                 '.d2l-download-button',
-                '[data-testid="download-button"]'
+                '[data-testid="download-button"]',
+                'button[title*="Download"]',
             ]
             
-            download_url = None
-            for selector in download_selectors:
+            # Try to click download button and capture the download
+            for selector in selectors:
                 try:
-                    download_element = await self.page.locator(selector).first
-                    if await download_element.count():
-                        download_url = await download_element.get_attribute('href')
-                        if download_url:
-                            # Make URL absolute if it's relative
-                            if download_url.startswith('/'):
-                                download_url = f"{self.base_url}{download_url}"
-                            print(f"  ✅ Found download URL: {download_url}")
-                            break
-                except:
+                    print(f"  🎯 Trying selector: {selector}")
+                    async with self.page.expect_download(timeout=10000) as download_info:
+                        await self.page.locator(selector).click()
+                    download = await download_info.value
+                    download_url = download.url
+                    
+                    # Debug: Check for any "Viiew" typo in the download URL
+                    if "Viiew" in download_url:
+                        print(f"  ⚠️ WARNING: Found 'Viiew' typo in download URL: {download_url}")
+                        # Fix the typo - Brightspace URLs are case-sensitive
+                        download_url = download_url.replace("Viiew", "View")
+                        print(f"  🔧 Fixed download URL: {download_url}")
+                    
+                    print(f"  ✅ Success: {file_title} → {download_url}")
+                    
+                    # TODO: Optionally save the file
+                    # await download.save_as(f"downloads/{file_title}.pdf")
+                    
+                    # Add a small delay to be respectful to the server
+                    await asyncio.sleep(1)
+                    
+                    return download_url
+                    
+                except Exception as e:
+                    print(f"  ⚠️ Failed with selector '{selector}': {e}")
                     continue
             
-            if not download_url:
-                print(f"  ⚠️ No download URL found for: {preview_url}")
-            
-            # Add a small delay to be respectful to the server
-            await asyncio.sleep(0.5)
-            
-            return download_url
+            print(f"  ❌ Failed to get download URL for: {file_title}")
+            return None
             
         except Exception as e:
-            print(f"  ❌ Error getting download URL: {e}")
+            print(f"  ❌ Error getting download URL for {file_title}: {e}")
             return None
     
     async def scrape_course_files(self) -> List[Dict]:
@@ -255,7 +277,7 @@ class OnQFileScraper:
             for i, file_info in enumerate(files):
                 print(f"  [{i+1}/{len(files)}] Processing: {file_info['title']}")
                 
-                download_url = await self.get_download_url(file_info['preview_url'])
+                download_url = await self.get_download_url(file_info['preview_url'], file_info['title'])
                 file_info['download_url'] = download_url
                 
                 # Add to our files list
