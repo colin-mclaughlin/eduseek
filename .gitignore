@@ -35,4 +35,6 @@ venv/
 # Ignore ChromaDB persistence files
 backend/chroma_db/
 
-backend/lms_scraper/onq_state.json
+onq_state.json
+
+scraped_files.json

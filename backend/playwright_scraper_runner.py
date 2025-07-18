@@ -253,105 +253,116 @@ def scrape_brightspace(username: str, password: str):
                     except:
                         continue
             
-            # If still no 2FA number found, let's look for any large numbers on the page
-            if not twofa_number:
-                print("No 2FA number found in prominent text, looking for any 2-digit numbers...")
-                
-                # Look for numbers in visible, selectable text elements first
-                print("Looking for numbers in visible text elements...")
-                visible_elements = page.query_selector_all('p, div, span, h1, h2, h3, h4, h5, h6, label, button')
-                visible_numbers = []
-                
-                for element in visible_elements:
-                    try:
-                        # Check if element is visible
-                        if element.is_visible():
-                            text = element.inner_text().strip()
-                            if text and len(text) > 0:
-                                # Look for 2-digit numbers in this visible text
-                                numbers = re.findall(r'\b(\d{2})\b', text)
-                                for num in numbers:
-                                    visible_numbers.append((num, text[:100]))  # Store number and context
-                                    print(f"Found number '{num}' in visible element: '{text[:200]}...'")
-                    except:
-                        continue
-                
-                print(f"All numbers found in visible elements: {visible_numbers}")
-                
-                # Also try to find the largest/most prominent number (likely the 2FA number)
-                print("Looking for the most prominent number on the page...")
+            # --- Improved 2FA number detection logic ---
+            # 1. Collect all 2-digit numbers and their context from visible elements
+            visible_elements = page.query_selector_all('p, div, span, h1, h2, h3, h4, h5, h6, label, button')
+            number_contexts = []  # List of (number, context)
+            for element in visible_elements:
                 try:
-                    # Look for numbers in larger text or prominent positions
-                    large_text_elements = page.query_selector_all('h1, h2, h3, div[style*="font-size"], div[class*="large"], div[class*="prominent"]')
-                    for element in large_text_elements:
-                        if element.is_visible():
-                            text = element.inner_text().strip()
-                            if text:
-                                numbers = re.findall(r'\b(\d{2})\b', text)
-                                for num in numbers:
-                                    print(f"Found number '{num}' in large/prominent element: '{text[:200]}...'")
+                    if element.is_visible():
+                        text = element.inner_text().strip()
+                        if text and len(text) > 0:
+                            numbers = re.findall(r'\b(\d{2})\b', text)
+                            for num in numbers:
+                                number_contexts.append((num, text.lower()))
+                                print(f"Found number '{num}' in visible element: '{text[:200]}...'")
                 except:
-                    pass
-                
-                # If we found numbers in visible elements, use the first one
-                if visible_numbers:
-                    # Look for the number that appears in 2FA-related context
-                    for num, context in visible_numbers:
-                        if any(keyword in context.lower() for keyword in ['approve', 'authenticator', 'enter', 'number', 'sign in']):
-                            twofa_number = num
-                            print(f"Found 2FA number in visible text: {twofa_number} (context: {context})")
-                            break
-                    else:
-                        # If no 2FA-related context found, use the first number
-                        twofa_number = visible_numbers[0][0]
-                        print(f"Found number in visible text (fallback): {twofa_number} (context: {visible_numbers[0][1]})")
+                    continue
+            print(f"All numbers with context: {number_contexts}")
+
+            # 2. Score/filter candidates based on 2FA-related phrases
+            twofa_phrases = [
+                "enter the number shown",
+                "approve sign in request",
+                "authenticator app",
+                "open your authenticator app",
+                "sign in",
+                "approve",
+                "verification",
+                "enter the number",
+                "number shown"
+            ]
+            candidate_scores = {}
+            for num, context in number_contexts:
+                score = sum(phrase in context for phrase in twofa_phrases)
+                if score > 0:
+                    candidate_scores[num] = candidate_scores.get(num, 0) + score
+            print(f"2FA candidate scores: {candidate_scores}")
+
+            # 3. Pick the best candidate (most context matches, or most frequent)
+            twofa_number = None
+            if candidate_scores:
+                # Pick the number with the highest score (if tie, pick the most frequent)
+                max_score = max(candidate_scores.values())
+                best_candidates = [num for num, score in candidate_scores.items() if score == max_score]
+                # If multiple, pick the one that appears most in number_contexts
+                freq = {num: sum(1 for n, _ in number_contexts if n == num) for num in best_candidates}
+                twofa_number = max(freq, key=freq.get)
+                print(f"Final 2FA number: {twofa_number} (contextual match)")
+            elif number_contexts:
+                freq = {}
+                for num, _ in number_contexts:
+                    freq[num] = freq.get(num, 0) + 1
+                twofa_number = max(freq, key=freq.get)
+                print(f"Final 2FA number: {twofa_number} (frequency fallback)")
+            else:
+                # 5. Last resort: look for any 2-digit number in the full page text
+                all_text = page.evaluate("() => document.body.innerText")
+                numbers = re.findall(r'\b(\d{2})\b', all_text)
+                if numbers:
+                    twofa_number = numbers[0]
+                    print(f"Final 2FA number: {twofa_number} (page text fallback)")
                 else:
-                    # Fallback: Get all text content and look for numbers
-                    all_text = page.evaluate("() => document.body.innerText")
-                    try:
-                        print(f"Full page text (first 1000 chars): {all_text[:1000]}")
-                    except UnicodeEncodeError:
-                        print("Full page text (first 1000 chars): [Content contains special characters]")
-                    
-                    numbers = re.findall(r'\b(\d{2})\b', all_text)
-                    print(f"All 2-digit numbers found: {numbers}")
-                    if numbers:
-                        twofa_number = numbers[0]
-                        print(f"Found number in page text: {twofa_number}")
-                        
-                        # Let's also check where this number appears in the HTML
-                        page_html = page.content()
-                        # Find the context around this number
-                        number_index = page_html.find(twofa_number)
-                        if number_index != -1:
-                            start = max(0, number_index - 100)
-                            end = min(len(page_html), number_index + 100)
-                            context = page_html[start:end]
-                            try:
-                                print(f"Context around number '{twofa_number}': {context}")
-                            except UnicodeEncodeError:
-                                print(f"Context around number '{twofa_number}': [Content contains special characters]")
-            
-            # Check for various success indicators
-            success_indicators = [
-                "d2l/home" in current_url,
-                "onq.queensu.ca/d2l" in current_url,
-                "brightspace" in current_url,
-                "dashboard" in page_content,
-                "welcome" in page_content
-            ]
-            
-            # Check for 2FA indicators
-            twofa_indicators = [
-                "verification" in page_content,
-                "authenticator" in page_content,
-                "approve" in page_content,
-                "notification" in page_content,
-                "microsoft authenticator" in page_content,
-                "enter the number" in page_content,
-                "enter this number" in page_content,
-                "verification code" in page_content
-            ]
+                    print("No 2FA number found")
+
+            # If twofa_number is set, skip all further fallback and pattern-matching code
+            if twofa_number:
+                # Check for various success indicators
+                success_indicators = [
+                    "d2l/home" in current_url,
+                    "onq.queensu.ca/d2l" in current_url,
+                    "brightspace" in current_url,
+                    "dashboard" in page_content,
+                    "welcome" in page_content
+                ]
+                # Check for 2FA indicators
+                twofa_indicators = [
+                    "verification" in page_content,
+                    "authenticator" in page_content,
+                    "approve" in page_content,
+                    "notification" in page_content,
+                    "microsoft authenticator" in page_content,
+                    "enter the number" in page_content,
+                    "enter this number" in page_content,
+                    "verification code" in page_content
+                ]
+                success = any(success_indicators)
+                twofa_required = any(twofa_indicators)
+                print(f"Success indicators found: {success}")
+                print(f"2FA indicators found: {twofa_required}")
+                print(f"Final URL: {current_url}")
+                browser.close()
+                if success:
+                    print(json.dumps({
+                        "status": "success",
+                        "message": "Login successful",
+                        "url": current_url
+                    }))
+                elif twofa_required:
+                    message = f"Two-factor authentication required - enter {twofa_number} on your phone"
+                    print(json.dumps({
+                        "status": "twofa_required",
+                        "message": message,
+                        "url": current_url,
+                        "twofa_number": twofa_number
+                    }))
+                else:
+                    print(json.dumps({
+                        "status": "failure",
+                        "message": "Login failed - could not reach dashboard",
+                        "url": current_url
+                    }))
+                return
             
             # Look for the 2-digit number on the page - be more specific
             
