@@ -87,48 +87,66 @@ class OnQFileScraper:
         try:
             print("📄 Extracting file links from content...")
             
-            # Wait for content to be fully loaded
+            # Wait for at least one preview link to appear
             await self.page.wait_for_selector('a.d2l-link[href*="/viewContent/"]', timeout=10000)
             
-            # Get all content items
-            content_items = await self.page.locator('[data-testid="content-list"] > div').all()
+            # Select all file links directly
+            file_links = await self.page.locator('a.d2l-link[href*="/viewContent/"]').all()
             
-            for item in content_items:
+            print(f"🔍 Found {len(file_links)} file links to process...")
+            
+            for i, link in enumerate(file_links, 1):
                 try:
-                    # Check if this is a file link
-                    file_link = await item.locator('a[href*="viewContent"]').first
-                    if not await file_link.count():
-                        continue
-                    
-                    # Extract file information
-                    title = await file_link.text_content() or "Unknown Title"
+                    # Extract title
+                    title = await link.inner_text()
+                    if not title or not title.strip():
+                        title = "Unknown Title"
                     title = title.strip()
                     
-                    # Get the preview URL
-                    preview_url = await file_link.get_attribute('href')
+                    # Extract preview URL
+                    preview_url = await link.get_attribute("href")
                     if not preview_url:
+                        print(f"  ⚠️ Skipping file {i}: No href attribute")
                         continue
                     
                     # Make URL absolute if it's relative
                     if preview_url.startswith('/'):
                         preview_url = f"{self.base_url}{preview_url}"
                     
-                    # Try to get file type from the item
-                    file_type_element = await item.locator('.d2l-filetype-icon, [class*="filetype"]').first
+                    # Infer file type from URL extension
                     file_type = "Unknown"
-                    if await file_type_element.count():
-                        file_type_text = await file_type_element.get_attribute('title') or await file_type_element.text_content()
-                        if file_type_text:
-                            file_type = file_type_text.strip()
+                    if '.' in preview_url:
+                        extension = preview_url.split('.')[-1].lower()
+                        if extension in ['pdf']:
+                            file_type = "PDF document"
+                        elif extension in ['doc', 'docx']:
+                            file_type = "Word document"
+                        elif extension in ['ppt', 'pptx']:
+                            file_type = "PowerPoint presentation"
+                        elif extension in ['xls', 'xlsx']:
+                            file_type = "Excel spreadsheet"
+                        elif extension in ['txt']:
+                            file_type = "Text document"
+                        elif extension in ['zip', 'rar']:
+                            file_type = "Compressed file"
+                        else:
+                            file_type = f"{extension.upper()} file"
                     
-                    # Try to get module/section heading
+                    # Try to get module/section heading (optional)
                     module_heading = "Unknown Module"
-                    parent_section = await item.locator('xpath=ancestor::div[contains(@class, "d2l-module") or contains(@class, "d2l-section")]').first
-                    if await parent_section.count():
-                        heading_element = await parent_section.locator('h2, h3, .d2l-module-title, .d2l-section-title').first
-                        if await heading_element.count():
-                            module_heading = await heading_element.text_content() or "Unknown Module"
-                            module_heading = module_heading.strip()
+                    try:
+                        # Look for the closest parent section
+                        parent_section = await link.locator('xpath=ancestor::div[contains(@class, "d2l-module") or contains(@class, "d2l-section") or contains(@class, "d2l-content-item")]').first
+                        if await parent_section.count():
+                            # Try to find a heading within this section
+                            heading_element = await parent_section.locator('h2, h3, .d2l-module-title, .d2l-section-title, [class*="title"]').first
+                            if await heading_element.count():
+                                module_text = await heading_element.text_content()
+                                if module_text and module_text.strip():
+                                    module_heading = module_text.strip()
+                    except Exception as e:
+                        # Module detection is optional, so we don't fail if it doesn't work
+                        pass
                     
                     file_info = {
                         "title": title,
@@ -139,13 +157,17 @@ class OnQFileScraper:
                     }
                     
                     files.append(file_info)
-                    print(f"  📄 Found file: {title} ({file_type}) in {module_heading}")
+                    print(f"  📄 [{i}/{len(file_links)}] Found: {title} ({file_type}) → {preview_url}")
                     
                 except Exception as e:
-                    print(f"  ⚠️ Error extracting file info: {e}")
+                    print(f"  ⚠️ Error extracting file {i}: {e}")
                     continue
             
-            print(f"✅ Extracted {len(files)} files from content")
+            print(f"✅ Successfully extracted {len(files)} files from content")
+            
+            # TODO: Visit each preview page to extract actual download links
+            print("📋 TODO: Implement download URL extraction for each file")
+            
             return files
             
         except Exception as e:
