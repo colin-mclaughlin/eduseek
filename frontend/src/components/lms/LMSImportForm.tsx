@@ -4,7 +4,8 @@ import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 
 const LMS_OPTIONS = [
-  { label: "Brightspace", value: "brightspace" },
+  { label: "Brightspace (Mock)", value: "brightspace" },
+  { label: "Brightspace (Real Login Test)", value: "brightspace-real" },
   { label: "Canvas", value: "canvas" },
   { label: "Moodle", value: "moodle" },
 ];
@@ -36,7 +37,19 @@ export default function LMSImportForm() {
       if (!res.ok) {
         setError(data.detail || "Import failed. Please check your credentials.");
       } else {
-        setSuccess(data.message || "Import successful!");
+        // Handle different response statuses
+        if (data.status === "twofa_required") {
+          const twofaNumber = data.twofa_number;
+          if (twofaNumber) {
+            setError(`Two-factor authentication required. Enter ${twofaNumber} on your phone when prompted, then try again.`);
+          } else {
+            setError("Two-factor authentication required. Please approve the notification on your device and try again.");
+          }
+        } else if (data.status === "success") {
+          setSuccess(data.message || "Import successful!");
+        } else {
+          setSuccess(data.message || "Import successful!");
+        }
       }
     } catch (err) {
       setError("Network error. Please try again.");
