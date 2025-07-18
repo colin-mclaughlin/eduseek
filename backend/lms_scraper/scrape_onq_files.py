@@ -9,6 +9,56 @@ from playwright.async_api import async_playwright, Page, Browser
 # Set the correct browser path for Windows
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "C:\\Users\\colin\\AppData\\Local\\ms-playwright"
 
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename to be safe for filesystem."""
+    # Remove or replace invalid characters
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        filename = filename.replace(char, '_')
+    
+    # Remove leading/trailing spaces and dots
+    filename = filename.strip('. ')
+    
+    # Limit length
+    if len(filename) > 200:
+        filename = filename[:200]
+    
+    return filename
+
+def get_file_extension(file_type: str, title: str) -> str:
+    """Get appropriate file extension based on file type and title."""
+    # Check file type first
+    if "PDF" in file_type:
+        return ".pdf"
+    elif "Word" in file_type:
+        return ".docx"
+    elif "PowerPoint" in file_type:
+        return ".pptx"
+    elif "Excel" in file_type:
+        return ".xlsx"
+    elif "Text" in file_type:
+        return ".txt"
+    elif "Compressed" in file_type:
+        return ".zip"
+    
+    # Fallback: check title for common extensions
+    title_lower = title.lower()
+    if title_lower.endswith('.pdf'):
+        return ".pdf"
+    elif title_lower.endswith('.doc') or title_lower.endswith('.docx'):
+        return ".docx"
+    elif title_lower.endswith('.ppt') or title_lower.endswith('.pptx'):
+        return ".pptx"
+    elif title_lower.endswith('.xls') or title_lower.endswith('.xlsx'):
+        return ".xlsx"
+    elif title_lower.endswith('.txt'):
+        return ".txt"
+    elif title_lower.endswith('.zip') or title_lower.endswith('.rar'):
+        return ".zip"
+    
+    # Default to PDF if no clear indication
+    return ".pdf"
+
 class OnQFileScraper:
     def __init__(self, page: Page):
         self.page = page
@@ -185,7 +235,7 @@ class OnQFileScraper:
             print(f"❌ Error extracting file links: {e}")
             return files
     
-    async def get_download_url(self, preview_url: str, file_title: str = "Unknown") -> Optional[str]:
+    async def get_download_url(self, preview_url: str, file_title: str = "Unknown", file_type: str = "Unknown") -> Optional[str]:
         """Visit the preview page and extract the download URL by clicking the download button."""
         try:
             print(f"🔗 Getting download URL for: {file_title}")
@@ -230,8 +280,35 @@ class OnQFileScraper:
                     
                     print(f"  ✅ Success: {file_title} → {download_url}")
                     
-                    # TODO: Optionally save the file
-                    # await download.save_as(f"downloads/{file_title}.pdf")
+                    # Save the file to disk
+                    try:
+                        # Ensure downloads directory exists
+                        os.makedirs("downloads", exist_ok=True)
+                        
+                        # Get appropriate file extension
+                        file_extension = get_file_extension(file_type, file_title)
+                        
+                        # Sanitize filename
+                        safe_filename = sanitize_filename(file_title)
+                        
+                        # Create full file path
+                        file_path = f"downloads/{safe_filename}{file_extension}"
+                        
+                        # Handle duplicate filenames
+                        counter = 1
+                        original_path = file_path
+                        while os.path.exists(file_path):
+                            name_without_ext = original_path.rsplit('.', 1)[0]
+                            ext = original_path.rsplit('.', 1)[1]
+                            file_path = f"{name_without_ext}_{counter}.{ext}"
+                            counter += 1
+                        
+                        # Save the file
+                        await download.save_as(file_path)
+                        print(f"  💾 Saved file: {file_path}")
+                        
+                    except Exception as save_error:
+                        print(f"  ⚠️ Failed to save file: {save_error}")
                     
                     # Add a small delay to be respectful to the server
                     await asyncio.sleep(1)
@@ -277,7 +354,7 @@ class OnQFileScraper:
             for i, file_info in enumerate(files):
                 print(f"  [{i+1}/{len(files)}] Processing: {file_info['title']}")
                 
-                download_url = await self.get_download_url(file_info['preview_url'], file_info['title'])
+                download_url = await self.get_download_url(file_info['preview_url'], file_info['title'], file_info['type'])
                 file_info['download_url'] = download_url
                 
                 # Add to our files list
@@ -336,6 +413,18 @@ async def main():
             with open('scraped_files.json', 'w') as f:
                 json.dump(files, f, indent=2)
             print(f"\n💾 Results saved to scraped_files.json")
+            
+            # Show download summary
+            downloaded_files = [f for f in files if f['download_url']]
+            if downloaded_files:
+                print(f"\n📁 Downloaded {len(downloaded_files)} files to 'downloads/' folder")
+                print("📋 Files available:")
+                for file_info in downloaded_files:
+                    safe_filename = sanitize_filename(file_info['title'])
+                    file_extension = get_file_extension(file_info['type'], file_info['title'])
+                    print(f"   • {safe_filename}{file_extension}")
+            else:
+                print("\n⚠️ No files were downloaded")
             
             # TODO: Send file data to backend or trigger ingestion
             print("\n📤 TODO: Implement backend integration")
