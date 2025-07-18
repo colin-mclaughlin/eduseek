@@ -42,3 +42,5 @@ scraped_files.json
 *.zip
 
 downloads/course_files_from_zip.json
+
+backend/lms_scraper/downloads/course_files_from_zip_*.json
