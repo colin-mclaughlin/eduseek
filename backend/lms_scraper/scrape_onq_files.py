@@ -5,6 +5,8 @@ import os
 import re
 from typing import List, Dict, Optional
 from playwright.async_api import async_playwright, Page, Browser
+import tempfile
+import zipfile
 
 # Set the correct browser path for Windows
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "C:\\Users\\colin\\AppData\\Local\\ms-playwright"
@@ -330,42 +332,94 @@ class OnQFileScraper:
         """Main method to scrape all course files."""
         try:
             print("🚀 Starting course file scraping...")
-            
             # Validate session first
             if not await self.validate_session():
                 raise Exception("Session is not valid")
-            
             # Navigate to course content
             if not await self.navigate_to_course_content():
                 raise Exception("Failed to navigate to course content")
-            
-            # Expand all modules
-            await self.expand_all_modules()
-            
-            # Extract file links
-            files = await self.extract_file_links()
-            
-            if not files:
-                print("⚠️ No files found in course content")
+            # --- REPLACE OLD SCRAPING LOGIC BELOW WITH TABLE OF CONTENTS ZIP METHOD ---
+            # Go to Table of Contents tab
+            try:
+                toc_selectors = [
+                    'div#TreeItemTOC.d2l-placeholder',
+                    'text=Table of Contents'
+                ]
+                toc_clicked = False
+                for selector in toc_selectors:
+                    try:
+                        toc = await self.page.query_selector(selector)
+                        if toc:
+                            await toc.click()
+                            toc_clicked = True
+                            print(f"Clicked Table of Contents tab using selector: {selector}")
+                            await self.page.wait_for_load_state('networkidle')
+                            break
+                    except Exception:
+                        continue
+                if not toc_clicked:
+                    print("❌ Could not find Table of Contents tab. Make sure you are on the Content page.")
+                    return []
+                # Wait for overlays to disappear
+                try:
+                    await self.page.wait_for_selector('.d2l-partial-render-shimbg1', state='detached', timeout=10000)
+                except Exception:
+                    pass  # If overlay not found, continue
+                await asyncio.sleep(0.5)  # Small extra delay
+            except Exception as e:
+                print(f"❌ Error navigating to Table of Contents: {e}")
                 return []
-            
-            # Get download URLs for each file
-            print(f"📥 Getting download URLs for {len(files)} files...")
-            for i, file_info in enumerate(files):
-                print(f"  [{i+1}/{len(files)}] Processing: {file_info['title']}")
-                
-                download_url = await self.get_download_url(file_info['preview_url'], file_info['title'], file_info['type'])
-                file_info['download_url'] = download_url
-                
-                # Add to our files list
-                self.files.append(file_info)
-            
-            print(f"✅ Scraping complete! Found {len(self.files)} files")
-            return self.files
-            
+            # Wait for Download button
+            try:
+                print("Waiting for Download button...")
+                # Re-query the Download button right before clicking
+                download_btn = await self.page.wait_for_selector('button.d2l-button:has-text("Download")', timeout=10000)
+            except Exception:
+                print("❌ Could not find Download button. Make sure you are on the Table of Contents page.")
+                return []
+            # Download ZIP
+            print("Clicking Download button and waiting for ZIP...")
+            try:
+                # Re-query the Download button again right before clicking
+                download_btn = await self.page.wait_for_selector('button.d2l-button:has-text("Download")', timeout=10000)
+                async with self.page.expect_download(timeout=30000) as download_info:
+                    await download_btn.click()
+                download = await download_info.value
+                downloads_dir = os.path.abspath('downloads')
+                os.makedirs(downloads_dir, exist_ok=True)
+                zip_path = os.path.join(downloads_dir, sanitize_filename(download.suggested_filename))
+                await download.save_as(zip_path)
+                print(f"Saved ZIP to: {zip_path}")
+            except Exception as e:
+                print(f"❌ Failed to download ZIP: {e}")
+                return []
+            # Extract and parse ZIP
+            with tempfile.TemporaryDirectory() as extract_dir:
+                try:
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        zip_ref.extractall(extract_dir)
+                    file_list = []
+                    for root, _, files in os.walk(extract_dir):
+                        for fname in files:
+                            rel_path = os.path.relpath(os.path.join(root, fname), extract_dir)
+                            file_list.append({
+                                "filename": fname,
+                                "path": rel_path,
+                                "file_type": get_file_extension('', fname)[1:],
+                                "source": "zip_download"
+                            })
+                    print(f"Found {len(file_list)} files in ZIP.")
+                    output_path = os.path.join(downloads_dir, 'course_files_from_zip.json')
+                    with open(output_path, 'w', encoding='utf-8') as f:
+                        json.dump(file_list, f, indent=2)
+                    print(f"✅ Saved file metadata to {output_path}")
+                    return file_list
+                except Exception as e:
+                    print(f"❌ Failed to extract or parse ZIP: {e}")
+                    return []
         except Exception as e:
             print(f"❌ Error during scraping: {e}")
-            return self.files
+            return []
 
 async def scrape_course_files(page: Page) -> List[Dict]:
     """Convenience function to scrape course files from an authenticated page."""
@@ -403,28 +457,20 @@ async def main():
             # Print results
             print("\n📋 Scraped Files:")
             for i, file_info in enumerate(files, 1):
-                print(f"\n{i}. {file_info['title']}")
-                print(f"   Type: {file_info['type']}")
-                print(f"   Module: {file_info['module']}")
-                print(f"   Preview: {file_info['preview_url']}")
-                print(f"   Download: {file_info['download_url']}")
-            
+                print(f"\n{i}. {file_info['filename']}")
+                print(f"   Path: {file_info['path']}")
+                print(f"   Type: {file_info['file_type']}")
+                print(f"   Source: {file_info['source']}")
             # Save to JSON file for inspection
-            with open('scraped_files.json', 'w') as f:
+            with open('downloads/course_files_from_zip.json', 'w') as f:
                 json.dump(files, f, indent=2)
-            print(f"\n💾 Results saved to scraped_files.json")
+            print(f"\n💾 Results saved to downloads/course_files_from_zip.json")
             
             # Show download summary
-            downloaded_files = [f for f in files if f['download_url']]
-            if downloaded_files:
-                print(f"\n📁 Downloaded {len(downloaded_files)} files to 'downloads/' folder")
-                print("📋 Files available:")
-                for file_info in downloaded_files:
-                    safe_filename = sanitize_filename(file_info['title'])
-                    file_extension = get_file_extension(file_info['type'], file_info['title'])
-                    print(f"   • {safe_filename}{file_extension}")
-            else:
-                print("\n⚠️ No files were downloaded")
+            # (No reference to 'download_url' since ZIP-based metadata does not include it)
+            print("\n📁 Downloaded files to 'downloads/' folder:")
+            for file_info in files:
+                print(f"   • {file_info['filename']} ({file_info['file_type']})")
             
             # TODO: Send file data to backend or trigger ingestion
             print("\n📤 TODO: Implement backend integration")

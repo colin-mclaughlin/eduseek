@@ -38,3 +38,7 @@ backend/chroma_db/
 onq_state.json
 
 scraped_files.json
+
+*.zip
+
+downloads/course_files_from_zip.json
