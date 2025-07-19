@@ -221,20 +221,107 @@ async def scrape_course_files(page: Page, course_id: str = "1006419", course_nam
     scraper = OnQFileScraper(page, course_id)
     return await scraper.scrape_course_files(course_name)
 
-async def extract_course_links(page: Page) -> List[Tuple[str, str]]:
-    """Extract all course links from the OnQ dashboard."""
-    courses = []
+async def wait_for_dashboard_ready(page: Page) -> bool:
+    """Wait for dashboard to be fully loaded and ready with manual confirmation."""
+    print("🔄 Checking dashboard status...")
+    
     try:
-        print("🔍 Scanning dashboard for course links...")
-        
         # Navigate to dashboard if not already there
         current_url = page.url
         if "d2l/home" not in current_url:
             await page.goto("https://onq.queensu.ca/d2l/home")
             await page.wait_for_load_state("networkidle")
         
-        # Wait for course content to load
-        await page.wait_for_selector('[class*="course"], [class*="d2l-course"], a[href*="/d2l/le/"]', timeout=10000)
+        # Wait for page to be fully loaded
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_load_state("networkidle")
+        
+        # Check if we're still on login page (2FA not complete)
+        if "login.microsoftonline.com" in page.url or "signin" in page.url.lower():
+            print("\n🔐 2FA Required!")
+            print("The script detected you're still on the login page.")
+            print("Please complete your 2FA authentication in the browser.")
+            print("Once you're fully logged in and can see your courses, press Enter here.")
+            print("\n💡 Tips:")
+            print("  - Complete any SMS/email verification")
+            print("  - Wait for the dashboard to fully load")
+            print("  - Make sure you can see your course list")
+            print("  - Then come back here and press Enter")
+            
+            input("\nPress Enter when you're fully logged in and ready...")
+            
+            # Save the session after 2FA completion
+            try:
+                await page.context.storage_state(path="onq_state.json")
+                print("✅ Session saved after 2FA completion")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not save session: {e}")
+            
+            # Refresh the page to get the latest state
+            print("🔄 Refreshing page to get latest dashboard state...")
+            await page.reload()
+            await page.wait_for_load_state("networkidle")
+        
+        # Now check if dashboard is ready
+        print("🔍 Checking if dashboard is ready...")
+        
+        # Wait a moment for any final loading
+        await asyncio.sleep(2)
+        
+        # Try to detect if courses are present
+        course_selectors = [
+            '[class*="course"]',
+            '[class*="d2l-course"]',
+            'a[href*="/d2l/le/"]',
+            '[class*="card"]',
+            '[class*="tile"]'
+        ]
+        
+        courses_found = False
+        for selector in course_selectors:
+            try:
+                elements = await page.locator(selector).all()
+                if len(elements) > 0:
+                    print(f"✅ Found {len(elements)} elements with '{selector}'")
+                    courses_found = True
+                    break
+            except:
+                continue
+        
+        if courses_found:
+            print("✅ Dashboard appears to be ready!")
+            return True
+        else:
+            print("⚠️ No course elements found on dashboard")
+            print("This might mean:")
+            print("  - Dashboard is still loading")
+            print("  - You're not enrolled in any courses")
+            print("  - Page layout is different")
+            
+            # Offer to continue anyway or retry
+            retry = input("\nWould you like to retry dashboard detection? (y/n): ").strip().lower()
+            if retry in ['y', 'yes']:
+                return await wait_for_dashboard_ready(page)
+            else:
+                return False
+            
+    except Exception as e:
+        print(f"❌ Error checking dashboard: {e}")
+        return False
+
+async def extract_course_links(page: Page) -> List[Tuple[str, str]]:
+    """Extract all course links from the OnQ dashboard."""
+    courses = []
+    try:
+        print("🔍 Scanning dashboard for course links...")
+        
+        # Wait for dashboard to be fully ready first
+        if not await wait_for_dashboard_ready(page):
+            print("❌ Dashboard not ready, cannot extract courses")
+            return []
+        
+        # Now extract courses (dashboard should be ready)
+        print("🔍 Extracting course links...")
         
         # Debug: Let's see what's actually on the page (only if no courses found)
         debug_enabled = True  # Set to True for debugging
@@ -422,6 +509,28 @@ async def extract_course_links(page: Page) -> List[Tuple[str, str]]:
         print(f"❌ Error extracting course links: {e}")
         return []
 
+def manual_course_input() -> Tuple[str, str]:
+    """Allow manual input of course details when automatic detection fails."""
+    print("\n🔧 Manual course input mode")
+    print("If automatic course detection failed, you can manually enter course details.")
+    
+    while True:
+        try:
+            course_id = input("Enter course ID (e.g., 1006419): ").strip()
+            if course_id and course_id.isdigit():
+                break
+            else:
+                print("❌ Please enter a valid numeric course ID")
+        except KeyboardInterrupt:
+            print("\n❌ Manual input cancelled")
+            return None, None
+    
+    course_name = input("Enter course name (optional, press Enter to skip): ").strip()
+    if not course_name:
+        course_name = f"Course {course_id}"
+    
+    return course_name, course_id
+
 def display_course_selection(courses: List[Tuple[str, str]]) -> int:
     """Display courses to user and get their selection."""
     if not courses:
@@ -477,8 +586,30 @@ async def main():
             # Extract course links from the dashboard
             courses = await extract_course_links(page)
             
-            # Display course selection
-            selected_course_index = display_course_selection(courses)
+            # Handle case when no courses are found automatically
+            if not courses:
+                print("\n⚠️ No courses found automatically.")
+                print("This could be due to:")
+                print("  - Dashboard still loading")
+                print("  - Different page layout")
+                print("  - Need to complete 2FA first")
+                
+                # Offer manual input option
+                use_manual = input("\nWould you like to manually enter course details? (y/n): ").strip().lower()
+                if use_manual in ['y', 'yes']:
+                    course_name, course_id = manual_course_input()
+                    if course_name and course_id:
+                        courses = [(course_name, course_id)]
+                        selected_course_index = 0
+                    else:
+                        print("❌ Manual input cancelled")
+                        return
+                else:
+                    print("❌ No course selected")
+                    return
+            else:
+                # Display course selection
+                selected_course_index = display_course_selection(courses)
             
             if selected_course_index != -1:
                 # Get the selected course details
