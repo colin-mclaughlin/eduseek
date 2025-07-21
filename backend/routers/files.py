@@ -22,6 +22,7 @@ from dateutil import parser
 from collections import Counter
 from services.lms_scraper import scrape_lms_files, LMS_TYPE
 from fastapi import status
+import hashlib
 
 router = APIRouter()
 
@@ -150,15 +151,41 @@ def get_db():
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
+        # Save file to disk
         file_path = await save_uploaded_file(file)
+        # Compute sha256 hash
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+            content_hash = hashlib.sha256(file_bytes).hexdigest()
+        # Extract text
         text = extract_text_from_file(file_path)
-        # Save file entry to DB (now with text)
+        # Get course_id and filename from form if present
+        course_id = None
+        if hasattr(file, 'form') and file.form:
+            course_id = file.form.get('course_id')
+        # Check for duplicate (same course_id, filename, and content_hash)
+        duplicate_query = db.query(FileModel).filter(
+            FileModel.filename == file.filename,
+            FileModel.content_hash == content_hash
+        )
+        if course_id:
+            duplicate_query = duplicate_query.filter(FileModel.course_id == course_id)
+        duplicate = duplicate_query.first()
+        if duplicate:
+            return JSONResponse(status_code=409, content={
+                "duplicate": True,
+                "id": str(duplicate.id),
+                "filename": duplicate.filename,
+                "detail": "Duplicate file detected (same filename and content hash)."
+            })
+        # Save file entry to DB (now with text and content_hash)
         file_entry = FileModel(
             filename=file.filename,
-            text=text,  # <-- Save extracted text
+            text=text,
             summary=None,
             user_id=uuid.uuid4(),  # Generate a default user_id
-            course_id=uuid.uuid4()  # Generate a default course_id
+            course_id=uuid.uuid4(),  # Generate a default course_id
+            content_hash=content_hash
         )
         db.add(file_entry)
         db.commit()

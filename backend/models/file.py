@@ -16,6 +16,7 @@ class File(Base):
     uploaded_at = Column(DateTime, default=datetime.datetime.utcnow)
     user_id = Column(UUID(as_uuid=True), nullable=True)  # Remove foreign key constraint temporarily
     course_id = Column(UUID(as_uuid=True), nullable=True)  # Remove foreign key constraint temporarily
+    content_hash = Column(String, nullable=True, index=True)  # <-- Added for duplicate detection
     # user = relationship("User", back_populates="files")
     # course = relationship("Course", back_populates="files")
     # TODO: Re-enable foreign key constraints when users and courses tables are properly set up 

@@ -11,8 +11,8 @@ If --all is used, ingests all course JSONs in downloads/.
 This script:
 1. Reads the course JSON metadata
 2. Uploads each file to the backend /upload endpoint
-3. Includes course context (course_id, course_name) if available
-4. Provides detailed feedback on success/failure
+3. Includes course context (course_id, course_name, content_hash) if available
+4. Provides detailed feedback on success/failure/duplicates
 5. Handles duplicates and missing files gracefully
 """
 
@@ -23,12 +23,12 @@ import json
 from pathlib import Path
 import argparse
 import time
+import hashlib
 
 # Defaults
 DEFAULT_BACKEND_URL = "http://localhost:8000"
 UPLOAD_ENDPOINT_PATH = "/api/files/upload"
 DOWNLOADS_DIR = "downloads"
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Ingest downloaded course files into backend.")
@@ -40,11 +40,9 @@ def parse_args():
     parser.add_argument('--course-name', type=str, help='Override course name (for single course)')
     return parser.parse_args()
 
-
 def get_course_json_files():
     """Return all course JSON metadata files in downloads/ directory."""
     return list(Path(DOWNLOADS_DIR).glob('course_files_from_zip_*.json'))
-
 
 def extract_course_info_from_filename(json_path):
     """Extract course_id and course_name from the JSON filename."""
@@ -57,14 +55,23 @@ def extract_course_info_from_filename(json_path):
         return course_id, course_name
     return None, None
 
+def compute_sha256(file_path):
+    """Compute sha256 hash of a file."""
+    h = hashlib.sha256()
+    with open(file_path, 'rb') as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
 def upload_file(file_path, entry, upload_url, course_id=None, course_name=None):
-    """Upload a single file to the backend with course context."""
+    """Upload a single file to the backend with course context and content_hash."""
     try:
+        content_hash = compute_sha256(file_path)
         with open(file_path, 'rb') as f:
             files = {'file': (entry['filename'], f, 'application/octet-stream')}
             data = {
                 'file_type': entry.get('file_type', ''),
+                'content_hash': content_hash
             }
             if course_id:
                 data['course_id'] = course_id
@@ -74,14 +81,16 @@ def upload_file(file_path, entry, upload_url, course_id=None, course_name=None):
         if resp.status_code == 200:
             result = resp.json()
             print(f"  ✅ Uploaded: {entry['filename']} → ID: {result.get('id', 'N/A')}")
-            return True
+            return 'uploaded'
+        elif resp.status_code == 409:
+            print(f"  ⏭️ Skipped duplicate: {entry['filename']} (already exists on backend)")
+            return 'duplicate'
         else:
             print(f"  ❌ Failed: {entry['filename']} (HTTP {resp.status_code}): {resp.text}")
-            return False
+            return 'failed'
     except Exception as e:
         print(f"  💥 Error uploading {entry['filename']}: {e}")
-        return False
-
+        return 'failed'
 
 def ingest_course_json(json_path, backend_url, course_id_override=None, course_name_override=None):
     print(f"\n📋 Ingesting course JSON: {json_path}")
@@ -95,53 +104,57 @@ def ingest_course_json(json_path, backend_url, course_id_override=None, course_n
         course_name = course_name_override
     print(f"   Course ID: {course_id}")
     print(f"   Course Name: {course_name}")
-    success, fail, missing = 0, 0, 0
+    uploaded, duplicate, failed, missing = 0, 0, 0, 0
     for entry in entries:
         file_path = os.path.join(DOWNLOADS_DIR, entry['path'])
         if not os.path.exists(file_path):
             print(f"  ⚠️ Missing file: {file_path}")
             missing += 1
             continue
-        ok = upload_file(file_path, entry, upload_url, course_id, course_name)
-        if ok:
-            success += 1
+        result = upload_file(file_path, entry, upload_url, course_id, course_name)
+        if result == 'uploaded':
+            uploaded += 1
+        elif result == 'duplicate':
+            duplicate += 1
         else:
-            fail += 1
+            failed += 1
         time.sleep(0.2)
-    print(f"   ✅ Success: {success} | ❌ Failed: {fail} | ⚠️ Missing: {missing}")
-    return success, fail, missing
-
+    print(f"   ✅ Uploaded: {uploaded} | ⏭️ Duplicates: {duplicate} | ❌ Failed: {failed} | ⚠️ Missing: {missing}")
+    return uploaded, duplicate, failed, missing
 
 def main():
     args = parse_args()
     backend_url = args.backend_url
-    total_success, total_fail, total_missing = 0, 0, 0
+    total_uploaded, total_duplicate, total_failed, total_missing = 0, 0, 0, 0
     if args.all:
         json_files = get_course_json_files()
         if not json_files:
             print(f"❌ No course JSON files found in {DOWNLOADS_DIR}/")
             sys.exit(1)
         for json_path in json_files:
-            s, f, m = ingest_course_json(json_path, backend_url)
-            total_success += s
-            total_fail += f
+            u, d, f, m = ingest_course_json(json_path, backend_url)
+            total_uploaded += u
+            total_duplicate += d
+            total_failed += f
             total_missing += m
     else:
         if not os.path.exists(args.course_json):
             print(f"❌ Course JSON not found: {args.course_json}")
             sys.exit(1)
-        s, f, m = ingest_course_json(
+        u, d, f, m = ingest_course_json(
             args.course_json, backend_url, args.course_id, args.course_name
         )
-        total_success += s
-        total_fail += f
+        total_uploaded += u
+        total_duplicate += d
+        total_failed += f
         total_missing += m
     print("\n============================")
-    print(f"🎉 Total Success: {total_success}")
-    print(f"❌ Total Failed: {total_fail}")
-    print(f"⚠️ Total Missing: {total_missing}")
+    print(f"🎉 Uploaded: {total_uploaded}")
+    print(f"⏭️ Duplicates skipped: {total_duplicate}")
+    print(f"❌ Failed: {total_failed}")
+    print(f"⚠️ Missing: {total_missing}")
     print("============================\n")
-    if total_fail > 0:
+    if total_failed > 0:
         sys.exit(1)
     else:
         sys.exit(0)
