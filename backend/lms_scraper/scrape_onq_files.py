@@ -6,6 +6,9 @@ from typing import List, Dict, Optional, Tuple
 from playwright.async_api import async_playwright, Page
 import tempfile
 import zipfile
+import argparse
+import datetime
+import shutil
 
 # Set the correct browser path for Windows
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "C:\\Users\\colin\\AppData\\Local\\ms-playwright"
@@ -45,6 +48,28 @@ def get_file_type(filename: str) -> str:
         return 'compressed'
     else:
         return ext.lstrip('.') or 'other'
+
+def parse_scraper_args():
+    parser = argparse.ArgumentParser(description="LMS Scraper with duplicate handling.")
+    parser.add_argument('--rename-duplicates', action='store_true', help='Rename ZIPs and files if duplicates exist (default)')
+    parser.add_argument('--overwrite', action='store_true', help='Overwrite ZIPs and files if duplicates exist')
+    parser.add_argument('--skip-duplicates', action='store_true', help='Skip ZIPs and files if duplicates exist')
+    return parser.parse_args()
+
+def get_unique_filename(path, strategy='rename'):
+    """Return a unique filename based on the strategy: rename, overwrite, or skip."""
+    if not os.path.exists(path):
+        return path, None
+    if strategy == 'overwrite':
+        return path, 'overwrite'
+    elif strategy == 'skip':
+        return None, 'skip'
+    else:  # rename
+        base, ext = os.path.splitext(path)
+        import datetime
+        timestamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        new_path = f"{base}_{timestamp}{ext}"
+        return new_path, 'rename'
 
 class OnQFileScraper:
     def __init__(self, page: Page, course_id: str = "1006419"):
@@ -89,7 +114,7 @@ class OnQFileScraper:
             print(f"❌ Error navigating to course content: {e}")
             return False
     
-    async def scrape_course_files(self, course_name: str = "Unknown Course") -> List[Dict]:
+    async def scrape_course_files(self, course_name: str = "Unknown Course", scrape_batch_id: str = None) -> List[Dict]:
         """Main method to scrape all course files using Table of Contents ZIP method."""
         try:
             print(f"🚀 Starting course file scraping for: {course_name}")
@@ -164,7 +189,15 @@ class OnQFileScraper:
                 
                 downloads_dir = os.path.abspath('downloads')
                 os.makedirs(downloads_dir, exist_ok=True)
-                zip_path = os.path.join(downloads_dir, sanitize_filename(download.suggested_filename))
+                zip_path_raw = os.path.join(downloads_dir, sanitize_filename(download.suggested_filename))
+                zip_path, zip_action = get_unique_filename(zip_path_raw, 'rename')
+                if zip_path is None:
+                    print(f"⏭️ Skipped ZIP (duplicate exists): {zip_path_raw}")
+                    return []
+                if zip_action == 'rename':
+                    print(f"📝 Renamed ZIP to avoid duplicate: {zip_path}")
+                elif zip_action == 'overwrite':
+                    print(f"⚠️ Overwriting existing ZIP: {zip_path}")
                 await download.save_as(zip_path)
                 print(f"Saved ZIP to: {zip_path}")
                 
@@ -191,14 +224,38 @@ class OnQFileScraper:
                     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                         zip_ref.extractall(extract_dir)
                     file_list = []
+                    extracted_renamed, extracted_skipped, extracted_overwritten = 0, 0, 0
+                    for root, _, files in os.walk(extract_dir):
+                        for fname in files:
+                            rel_path = os.path.relpath(os.path.join(root, fname), extract_dir)
+                            out_path_raw = os.path.join(downloads_dir, rel_path)
+                            out_dir = os.path.dirname(out_path_raw)
+                            if not os.path.exists(out_dir):
+                                os.makedirs(out_dir, exist_ok=True)
+                            out_path, file_action = get_unique_filename(out_path_raw, 'rename')
+                            if out_path is None:
+                                print(f"⏭️ Skipped extracted file (duplicate exists): {out_path_raw}")
+                                extracted_skipped += 1
+                                continue
+                            if file_action == 'rename':
+                                print(f"📝 Renamed extracted file to avoid duplicate: {out_path}")
+                                extracted_renamed += 1
+                            elif file_action == 'overwrite':
+                                print(f"⚠️ Overwriting existing file: {out_path}")
+                                extracted_overwritten += 1
+                            # Actually copy the file, preserving subfolders
+                            shutil.copy2(os.path.join(root, fname), out_path)
+                    print(f"\n📄 Extraction Summary: Renamed: {extracted_renamed}, Skipped: {extracted_skipped}, Overwritten: {extracted_overwritten}")
+                    file_list = []
                     for root, _, files in os.walk(extract_dir):
                         for fname in files:
                             rel_path = os.path.relpath(os.path.join(root, fname), extract_dir)
                             file_list.append({
                                 "filename": fname,
-                                "path": rel_path,
+                                "path": rel_path.replace("/", "\\"),
                                 "file_type": get_file_type(fname),
-                                "source": "zip_download"
+                                "source": "zip_download",
+                                "scrape_batch_id": scrape_batch_id
                             })
                     print(f"Found {len(file_list)} files in ZIP.")
                     
@@ -216,10 +273,10 @@ class OnQFileScraper:
             print(f"❌ Error during scraping: {e}")
             return []
 
-async def scrape_course_files(page: Page, course_id: str = "1006419", course_name: str = "Unknown Course") -> List[Dict]:
+async def scrape_course_files(page: Page, course_id: str = "1006419", course_name: str = "Unknown Course", scrape_batch_id: str = None) -> List[Dict]:
     """Convenience function to scrape course files from an authenticated page."""
     scraper = OnQFileScraper(page, course_id)
-    return await scraper.scrape_course_files(course_name)
+    return await scraper.scrape_course_files(course_name, scrape_batch_id=scrape_batch_id)
 
 async def wait_for_dashboard_ready(page: Page) -> bool:
     """Wait for dashboard to be fully loaded and ready with manual confirmation."""
@@ -559,6 +616,15 @@ def display_course_selection(courses: List[Tuple[str, str]]) -> int:
             return -1
 
 async def main():
+    args = parse_scraper_args()
+    duplicate_strategy = 'rename'
+    if args.overwrite:
+        duplicate_strategy = 'overwrite'
+    elif args.skip_duplicates:
+        duplicate_strategy = 'skip'
+    # Generate a scrape_batch_id for this run
+    scrape_batch_id = datetime.datetime.now().strftime('batch_%Y%m%d-%H%M%S')
+    print(f"[Scraper] Using scrape_batch_id: {scrape_batch_id}")
     """Main function for local testing."""
     async with async_playwright() as p:
         try:
@@ -668,7 +734,7 @@ async def main():
                     await page.wait_for_load_state("networkidle")
                 
                 # Scrape the files from the selected course
-                files = await scrape_course_files(page, selected_course_id, selected_course_name)
+                files = await scrape_course_files(page, selected_course_id, selected_course_name, scrape_batch_id=scrape_batch_id)
                 
                 # Print results
                 print("\n📋 Scraped Files:")

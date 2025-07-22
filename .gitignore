@@ -44,3 +44,10 @@ scraped_files.json
 downloads/course_files_from_zip.json
 
 backend/lms_scraper/downloads/course_files_from_zip_*.json
+
+# Ignore ingestion log
+backend/lms_scraper/ingestion_log.json
+
+# Ignore scraped HTML/CSS files
+backend/lms_scraper/downloads/**/*.html
+backend/lms_scraper/downloads/**/*.css
