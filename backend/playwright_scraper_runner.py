@@ -210,112 +210,141 @@ def login_and_get_session(username: str, password: str):
             current_url = page.url
             page_content = page.content().lower()
             
-            # --- Line-by-line 2FA number detection logic ---
-            print("Looking for 2FA number with line-by-line targeted detection...")
+            # --- Direct selector-based 2FA number detection ---
+            print("Attempting direct selector-based 2FA number detection...")
             print(f"Page title: {page.title()}")
             
-            # 1. Collect all 2-digit numbers and their line context from visible elements
-            visible_elements = page.query_selector_all('p, div, span, h1, h2, h3, h4, h5, h6, label, button')
-            all_candidates = []  # List of (number, line_text, element_full_text, line_index)
-            
-            target_phrases = [
-                "enter the number shown to sign in",
-                "open your authenticator app"
-            ]
-            
-            exclusion_phrases = [
-                "don't ask again for",
-                "remember this device",
-                "stay signed in"
-            ]
-            
-            for element in visible_elements:
-                try:
-                    if element.is_visible():
-                        full_text = element.inner_text().strip()
-                        if full_text and len(full_text) > 0:
-                            # Split element text into lines
-                            lines = [line.strip() for line in full_text.split('\n') if line.strip()]
-                            
-                            for line_idx, line in enumerate(lines):
-                                line_lower = line.lower()
-                                numbers = re.findall(r'\b(\d{2})\b', line)
-                                
-                                for num in numbers:
-                                    all_candidates.append((num, line, full_text, line_idx))
-                                    print(f"DEBUG: Found number '{num}' in line {line_idx}: '{line}'")
-                except:
-                    continue
-            
-            print(f"DEBUG: Total candidates found: {len(all_candidates)}")
-            
-            # 2. Process candidates with line-by-line logic
-            strong_candidates = []
-            weak_candidates = []
-            excluded_candidates = []
-            
-            for num, line, full_text, line_idx in all_candidates:
-                line_lower = line.lower()
-                
-                # Check if number is in same line as target phrase
-                has_target_in_same_line = any(phrase in line_lower for phrase in target_phrases)
-                
-                # Check if number is in line following a target phrase
-                has_target_in_previous_line = False
-                if line_idx > 0:
-                    lines = [l.strip() for l in full_text.split('\n') if l.strip()]
-                    if line_idx < len(lines):
-                        prev_line = lines[line_idx - 1].lower()
-                        has_target_in_previous_line = any(phrase in prev_line for phrase in target_phrases)
-                
-                # Check if number should be excluded (exclusion phrase in SAME line as number)
-                has_exclusion_in_same_line = any(exclusion in line_lower for exclusion in exclusion_phrases)
-                
-                if has_exclusion_in_same_line:
-                    excluded_candidates.append((num, line))
-                    print(f"DEBUG: EXCLUDED number '{num}' - exclusion phrase in same line: '{line}'")
-                elif has_target_in_same_line:
-                    strong_candidates.append((num, line, "same_line"))
-                    print(f"DEBUG: STRONG candidate '{num}' - target phrase in same line: '{line}'")
-                elif has_target_in_previous_line:
-                    strong_candidates.append((num, line, "following_line"))
-                    print(f"DEBUG: STRONG candidate '{num}' - follows target phrase: '{line}'")
-                else:
-                    # Check for general 2FA context in the line
-                    general_phrases = ["authenticator", "verification", "approve", "sign in"]
-                    if any(phrase in line_lower for phrase in general_phrases):
-                        weak_candidates.append((num, line, "general_context"))
-                        print(f"DEBUG: WEAK candidate '{num}' - general 2FA context: '{line}'")
-                    else:
-                        print(f"DEBUG: IGNORED number '{num}' - no relevant context: '{line}'")
-            
-            print(f"DEBUG: Strong candidates: {[(num, reason) for num, line, reason in strong_candidates]}")
-            print(f"DEBUG: Weak candidates: {[(num, reason) for num, line, reason in weak_candidates]}")
-            print(f"DEBUG: Excluded candidates: {[num for num, line in excluded_candidates]}")
-            
-            # 3. Pick the best candidate
             twofa_number = None
-            selected_reason = None
             
-            if strong_candidates:
-                # Prefer numbers in same line as target phrase, then following lines
-                same_line_candidates = [c for c in strong_candidates if c[2] == "same_line"]
-                if same_line_candidates:
-                    twofa_number = same_line_candidates[0][0]
-                    selected_reason = f"same line as target phrase: '{same_line_candidates[0][1]}'"
+            # Try to get 2FA number directly from the Microsoft Authenticator display element
+            try:
+                print("Looking for 2FA number using selector '#idRichContext_DisplaySign'...")
+                display_sign_element = page.wait_for_selector('#idRichContext_DisplaySign', timeout=30000)
+                
+                if display_sign_element:
+                    element_text = display_sign_element.inner_text().strip()
+                    print(f"Found #idRichContext_DisplaySign element with text: '{element_text}'")
+                    
+                    # Extract 2-digit number from the element
+                    numbers = re.findall(r'\b(\d{2})\b', element_text)
+                    if numbers:
+                        twofa_number = numbers[0]
+                        print(f"SUCCESS: 2FA number extracted from selector: {twofa_number}")
+                        print(f">>> ENTER THIS NUMBER ON YOUR AUTHENTICATOR APP: {twofa_number} <<<")
+                    else:
+                        print(f"WARNING: Found selector but no 2-digit number in text: '{element_text}'")
                 else:
-                    twofa_number = strong_candidates[0][0]
-                    selected_reason = f"line following target phrase: '{strong_candidates[0][1]}'"
-                print(f"Selected 2FA number from strong candidates: {twofa_number} ({selected_reason})")
-            elif weak_candidates:
-                twofa_number = weak_candidates[0][0]
-                selected_reason = f"general 2FA context: '{weak_candidates[0][1]}'"
-                print(f"Selected 2FA number from weak candidates: {twofa_number} ({selected_reason})")
+                    print("Selector found but element is None")
+                    
+            except Exception as e:
+                print(f"Direct selector method failed: {str(e)}")
+                print("Falling back to context-based detection...")
             
-            if twofa_number:
-                print(f"Final 2FA number detected: {twofa_number}")
-            else:
-                print("No 2FA number found with line-by-line targeted detection")
+            # --- Fallback: Line-by-line 2FA number detection logic ---
+            if not twofa_number:
+                print("Using fallback line-by-line targeted detection...")
+                
+                # 1. Collect all 2-digit numbers and their line context from visible elements
+                visible_elements = page.query_selector_all('p, div, span, h1, h2, h3, h4, h5, h6, label, button')
+                all_candidates = []  # List of (number, line_text, element_full_text, line_index)
+            
+                target_phrases = [
+                    "enter the number shown to sign in",
+                    "open your authenticator app"
+                ]
+                
+                exclusion_phrases = [
+                    "don't ask again for",
+                    "remember this device",
+                    "stay signed in"
+                ]
+                
+                for element in visible_elements:
+                    try:
+                        if element.is_visible():
+                            full_text = element.inner_text().strip()
+                            if full_text and len(full_text) > 0:
+                                # Split element text into lines
+                                lines = [line.strip() for line in full_text.split('\n') if line.strip()]
+                                
+                                for line_idx, line in enumerate(lines):
+                                    line_lower = line.lower()
+                                    numbers = re.findall(r'\b(\d{2})\b', line)
+                                    
+                                    for num in numbers:
+                                        all_candidates.append((num, line, full_text, line_idx))
+                                        print(f"DEBUG: Found number '{num}' in line {line_idx}: '{line}'")
+                    except:
+                        continue
+            
+                print(f"DEBUG: Total candidates found: {len(all_candidates)}")
+                
+                # 2. Process candidates with line-by-line logic
+                strong_candidates = []
+                weak_candidates = []
+                excluded_candidates = []
+            
+                for num, line, full_text, line_idx in all_candidates:
+                    line_lower = line.lower()
+                    
+                    # Check if number is in same line as target phrase
+                    has_target_in_same_line = any(phrase in line_lower for phrase in target_phrases)
+                    
+                    # Check if number is in line following a target phrase
+                    has_target_in_previous_line = False
+                    if line_idx > 0:
+                        lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+                        if line_idx < len(lines):
+                            prev_line = lines[line_idx - 1].lower()
+                            has_target_in_previous_line = any(phrase in prev_line for phrase in target_phrases)
+                    
+                    # Check if number should be excluded (exclusion phrase in SAME line as number)
+                    has_exclusion_in_same_line = any(exclusion in line_lower for exclusion in exclusion_phrases)
+                    
+                    if has_exclusion_in_same_line:
+                        excluded_candidates.append((num, line))
+                        print(f"DEBUG: EXCLUDED number '{num}' - exclusion phrase in same line: '{line}'")
+                    elif has_target_in_same_line:
+                        strong_candidates.append((num, line, "same_line"))
+                        print(f"DEBUG: STRONG candidate '{num}' - target phrase in same line: '{line}'")
+                    elif has_target_in_previous_line:
+                        strong_candidates.append((num, line, "following_line"))
+                        print(f"DEBUG: STRONG candidate '{num}' - follows target phrase: '{line}'")
+                    else:
+                        # Check for general 2FA context in the line
+                        general_phrases = ["authenticator", "verification", "approve", "sign in"]
+                        if any(phrase in line_lower for phrase in general_phrases):
+                            weak_candidates.append((num, line, "general_context"))
+                            print(f"DEBUG: WEAK candidate '{num}' - general 2FA context: '{line}'")
+                        else:
+                            print(f"DEBUG: IGNORED number '{num}' - no relevant context: '{line}'")
+                
+                print(f"DEBUG: Strong candidates: {[(num, reason) for num, line, reason in strong_candidates]}")
+                print(f"DEBUG: Weak candidates: {[(num, reason) for num, line, reason in weak_candidates]}")
+                print(f"DEBUG: Excluded candidates: {[num for num, line in excluded_candidates]}")
+                
+                # 3. Pick the best candidate
+                selected_reason = None
+                
+                if strong_candidates:
+                    # Prefer numbers in same line as target phrase, then following lines
+                    same_line_candidates = [c for c in strong_candidates if c[2] == "same_line"]
+                    if same_line_candidates:
+                        twofa_number = same_line_candidates[0][0]
+                        selected_reason = f"same line as target phrase: '{same_line_candidates[0][1]}'"
+                    else:
+                        twofa_number = strong_candidates[0][0]
+                        selected_reason = f"line following target phrase: '{strong_candidates[0][1]}'"
+                    print(f"Selected 2FA number from strong candidates: {twofa_number} ({selected_reason})")
+                elif weak_candidates:
+                    twofa_number = weak_candidates[0][0]
+                    selected_reason = f"general 2FA context: '{weak_candidates[0][1]}'"
+                    print(f"Selected 2FA number from weak candidates: {twofa_number} ({selected_reason})")
+                
+                if twofa_number:
+                    print(f"Final 2FA number detected: {twofa_number}")
+                else:
+                    print("No 2FA number found with line-by-line targeted detection")
 
             # Check for various success and 2FA indicators
             success_indicators = [
