@@ -411,7 +411,7 @@ def login_and_get_session(username: str, password: str):
                         
                         for selector in no_button_selectors:
                             try:
-                                if page.locator(selector).is_visible(timeout=1000):  # Quick check
+                                if page.locator(selector).is_visible():  # No timeout argument
                                     stay_signed_in_detected = True
                                     detection_method = f"DOM detection: found button '{selector}'"
                                     break
@@ -423,32 +423,70 @@ def login_and_get_session(username: str, password: str):
                         print(f"EVENT DETECTED: 'Stay signed in?' prompt via {detection_method}")
                         print("Automatically clicking 'No' to proceed to dashboard...")
                         
-                        # Click the "No" button
-                        no_button_selectors = [
-                            'input#idBtn_Back',
-                            'input[type="button"][value="No"]'
-                        ]
-                        
+                        # Improved "No" button clicking with tab management
                         clicked_no = False
-                        for selector in no_button_selectors:
-                            try:
-                                if page.locator(selector).is_visible(timeout=3000):
-                                    print(f"Detected 'Stay signed in?' prompt—clicked 'No' button via DOM detection using selector: {selector}")
-                                    page.locator(selector).click()
-                                    print("Clicked 'No' button - waiting for navigation to dashboard...")
-                                    page.wait_for_load_state("networkidle", timeout=10000)
-                                    time.sleep(2)
-                                    clicked_no = True
-                                    break
-                            except Exception as e:
-                                print(f"Error with selector {selector}: {e}")
-                                continue
+                        click_method = None
                         
+                        # Record initial tab count
+                        initial_pages = len(context.pages)
+                        
+                        # Try primary selector: input#idBtn_Back
+                        try:
+                            if page.locator('input#idBtn_Back').is_visible():
+                                print("Found 'No' button with primary selector: input#idBtn_Back")
+                                page.click('input#idBtn_Back')
+                                clicked_no = True
+                                click_method = "Primary selector: input#idBtn_Back"
+                        except Exception as e:
+                            print(f"Error with primary selector input#idBtn_Back: {e}")
+                        
+                        # Try fallback selector if primary failed
                         if not clicked_no:
-                            print("Could not find 'No' button, trying keyboard navigation")
-                            page.keyboard.press("Tab")
-                            page.keyboard.press("Enter")
+                            try:
+                                if page.locator('input[type="button"][value="No"]').is_visible():
+                                    print("Found 'No' button with fallback selector: input[type=\"button\"][value=\"No\"]")
+                                    page.click('input[type="button"][value="No"]')
+                                    clicked_no = True
+                                    click_method = "Fallback selector: input[type=\"button\"][value=\"No\"]"
+                            except Exception as e:
+                                print(f"Error with fallback selector: {e}")
+                        
+                        # Check for new tabs and close them if they appeared
+                        current_pages = len(context.pages)
+                        if current_pages > initial_pages:
+                            print(f"Detected {current_pages - initial_pages} new tab(s) opened, closing them...")
+                            # Close all new tabs and refocus on original
+                            for i in range(initial_pages, current_pages):
+                                try:
+                                    context.pages[i].close()
+                                    print(f"Closed new tab {i}")
+                                except:
+                                    pass
+                            # Ensure we're focused on the original page
+                            page.bring_to_front()
+                            print("Refocused on original tab")
+                        
+                        # Keyboard navigation as last resort
+                        if not clicked_no:
+                            print("Both selectors failed - attempting keyboard navigation (Tab+Enter)")
+                            try:
+                                page.keyboard.press("Tab")
+                                page.keyboard.press("Enter")
+                                clicked_no = True
+                                click_method = "Keyboard navigation: Tab+Enter"
+                            except Exception as e:
+                                print(f"Keyboard navigation failed: {e}")
+                        
+                        if clicked_no:
+                            print(f"Successfully handled 'Stay signed in?' prompt using method: {click_method}")
+                            print("Waiting for navigation to dashboard...")
+                            try:
+                                page.wait_for_load_state("networkidle", timeout=10000)
+                            except:
+                                print("Navigation timeout, continuing anyway...")
                             time.sleep(2)
+                        else:
+                            print("WARNING: All methods failed to click 'No' button")
                         
                         current_url = page.url
                         print(f"URL after handling 'Stay signed in?' prompt: {current_url}")
