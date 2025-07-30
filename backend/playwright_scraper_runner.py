@@ -384,37 +384,64 @@ def login_and_get_session(username: str, password: str):
                     message = f"Two-factor authentication required - enter {twofa_number} on your phone"
                 print(f"2FA detected: {message}")
                 
-                # Wait for user to complete 2FA and monitor for navigation
-                print("Waiting for 2FA completion and navigation...")
-                for i in range(120):  # Wait up to 2 minutes for 2FA completion
+                # Wait for post-2FA events: "Stay signed in?" or OnQ dashboard
+                print("Waiting for 2FA completion - monitoring for 'Stay signed in?' prompt or OnQ dashboard...")
+                start_time = time.time()
+                timeout_seconds = 120  # 2 minutes
+                
+                while time.time() - start_time < timeout_seconds:
                     time.sleep(1)
                     current_url = page.url
                     
-                    # Check for "Stay Signed In" page (SAS/ProcessAuth)
+                    # Event 1: Check for "Stay Signed In" page - both URL and DOM detection
+                    stay_signed_in_detected = False
+                    detection_method = None
+                    
+                    # Method 1: URL-based detection
                     if "/SAS/ProcessAuth" in current_url:
-                        print(f"Detected 'Stay Signed In' page at: {current_url}")
-                        print("Automatically clicking 'No' to continue...")
-                        
-                        # Try multiple selectors for the "No" button
+                        stay_signed_in_detected = True
+                        detection_method = f"URL detection: {current_url}"
+                    
+                    # Method 2: DOM-based detection - check for "No" button presence
+                    if not stay_signed_in_detected:
                         no_button_selectors = [
                             'input#idBtn_Back',
-                            'input[type="button"][value="No"]',
-                            'button:has-text("No")',
-                            'input[value="No"]'
+                            'input[type="button"][value="No"]'
+                        ]
+                        
+                        for selector in no_button_selectors:
+                            try:
+                                if page.locator(selector).is_visible(timeout=1000):  # Quick check
+                                    stay_signed_in_detected = True
+                                    detection_method = f"DOM detection: found button '{selector}'"
+                                    break
+                            except:
+                                continue
+                    
+                    # Handle "Stay signed in?" prompt if detected
+                    if stay_signed_in_detected:
+                        print(f"EVENT DETECTED: 'Stay signed in?' prompt via {detection_method}")
+                        print("Automatically clicking 'No' to proceed to dashboard...")
+                        
+                        # Click the "No" button
+                        no_button_selectors = [
+                            'input#idBtn_Back',
+                            'input[type="button"][value="No"]'
                         ]
                         
                         clicked_no = False
                         for selector in no_button_selectors:
                             try:
-                                if page.locator(selector).is_visible(timeout=2000):
-                                    print(f"Found 'No' button with selector: {selector}")
+                                if page.locator(selector).is_visible(timeout=3000):
+                                    print(f"Detected 'Stay signed in?' prompt—clicked 'No' button via DOM detection using selector: {selector}")
                                     page.locator(selector).click()
-                                    print("Clicked 'No' button")
+                                    print("Clicked 'No' button - waiting for navigation to dashboard...")
                                     page.wait_for_load_state("networkidle", timeout=10000)
                                     time.sleep(2)
                                     clicked_no = True
                                     break
-                            except:
+                            except Exception as e:
+                                print(f"Error with selector {selector}: {e}")
                                 continue
                         
                         if not clicked_no:
@@ -424,44 +451,53 @@ def login_and_get_session(username: str, password: str):
                             time.sleep(2)
                         
                         current_url = page.url
-                        print(f"URL after clicking 'No': {current_url}")
-                    
-                    # Check for successful navigation to OnQ dashboard
-                    if "/d2l/home" in current_url or "onq.queensu.ca/d2l" in current_url:
-                        print(f"Navigation to OnQ detected at: {current_url}")
+                        print(f"URL after handling 'Stay signed in?' prompt: {current_url}")
                         
-                        # Wait for dashboard elements to load
-                        time.sleep(3)
-                        try:
-                            # Look for dashboard-specific elements
-                            dashboard_selectors = [
-                                'd2l-navigation-sidenav',
-                                '[data-role="navigation"]',
-                                '.d2l-navigation',
-                                'nav[role="navigation"]'
-                            ]
-                            
-                            dashboard_found = False
-                            for selector in dashboard_selectors:
-                                try:
-                                    if page.locator(selector).is_visible(timeout=5000):
-                                        print(f"Dashboard element confirmed with selector: {selector}")
-                                        dashboard_found = True
-                                        break
-                                except:
-                                    continue
-                            
-                            if dashboard_found or "Dashboard" in page.content():
-                                print(f"Login complete - OnQ dashboard confirmed at: {current_url}")
-                                return browser, context, page
-                            else:
-                                print("OnQ URL detected but dashboard elements not found, continuing to wait...")
-                        except:
-                            print("Error checking for dashboard elements, but URL looks correct")
+                        # After handling "Stay signed in?", continue waiting for dashboard
+                        continue
+                    
+                    # Event 2: Check for OnQ dashboard navigation
+                    dashboard_url_detected = "/d2l/home" in current_url or "onq.queensu.ca" in current_url
+                    
+                    if dashboard_url_detected:
+                        print(f"EVENT DETECTED: OnQ dashboard URL at: {current_url}")
+                        
+                        # Wait a moment for dashboard elements to load
+                        time.sleep(2)
+                        
+                        # Check for dashboard-specific elements
+                        dashboard_selectors = [
+                            'd2l-navigation-sidenav',
+                            '.d2l-navigation',
+                            '[data-role="navigation"]'
+                        ]
+                        
+                        dashboard_element_found = False
+                        for selector in dashboard_selectors:
+                            try:
+                                if page.locator(selector).is_visible(timeout=3000):
+                                    print(f"Dashboard element confirmed with selector: {selector}")
+                                    dashboard_element_found = True
+                                    break
+                            except:
+                                continue
+                        
+                        # Also check for dashboard text content
+                        page_content = page.content()
+                        dashboard_text_found = any(text in page_content for text in ["Dashboard", "My Courses"])
+                        
+                        if dashboard_element_found or dashboard_text_found:
+                            print(f"SUCCESS: OnQ dashboard fully loaded and confirmed at: {current_url}")
                             return browser, context, page
+                        else:
+                            print("OnQ URL detected but dashboard elements not yet loaded, continuing to wait...")
+                            continue
                 
-                print("2FA/navigation timeout - returning browser for manual completion")
-                return browser, context, page
+                # Timeout handling
+                elapsed_time = time.time() - start_time
+                print(f"TIMEOUT: No dashboard detected after {elapsed_time:.1f} seconds")
+                print(f"Final URL: {page.url}")
+                raise Exception(f"Post-2FA timeout: Dashboard not detected within {timeout_seconds} seconds. Final URL: {page.url}")
             else:
                 raise Exception(f"Login failed - could not detect 2FA or reach dashboard. Current URL: {current_url}")
 
