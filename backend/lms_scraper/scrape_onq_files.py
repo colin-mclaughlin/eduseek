@@ -279,7 +279,7 @@ async def scrape_course_files(page: Page, course_id: str = "1006419", course_nam
     return await scraper.scrape_course_files(course_name, scrape_batch_id=scrape_batch_id)
 
 async def wait_for_dashboard_ready(page: Page) -> bool:
-    """Wait for dashboard to be fully loaded and ready with manual confirmation."""
+    """Wait for dashboard to be fully loaded and ready."""
     print("🔄 Checking dashboard status...")
     
     try:
@@ -293,31 +293,10 @@ async def wait_for_dashboard_ready(page: Page) -> bool:
         await page.wait_for_load_state("domcontentloaded")
         await page.wait_for_load_state("networkidle")
         
-        # Check if we're still on login page (2FA not complete)
+        # Check if we're still on login page (session expired)
         if "login.microsoftonline.com" in page.url or "signin" in page.url.lower():
-            print("\n🔐 2FA Required!")
-            print("The script detected you're still on the login page.")
-            print("Please complete your 2FA authentication in the browser.")
-            print("Once you're fully logged in and can see your courses, press Enter here.")
-            print("\n💡 Tips:")
-            print("  - Complete any SMS/email verification")
-            print("  - Wait for the dashboard to fully load")
-            print("  - Make sure you can see your course list")
-            print("  - Then come back here and press Enter")
-            
-            input("\nPress Enter when you're fully logged in and ready...")
-            
-            # Save the session after 2FA completion
-            try:
-                await page.context.storage_state(path="onq_state.json")
-                print("✅ Session saved after 2FA completion")
-            except Exception as e:
-                print(f"⚠️ Warning: Could not save session: {e}")
-            
-            # Refresh the page to get the latest state
-            print("🔄 Refreshing page to get latest dashboard state...")
-            await page.reload()
-            await page.wait_for_load_state("networkidle")
+            print("❌ Session expired - redirected to login page")
+            return False
         
         # Now check if dashboard is ready
         print("🔍 Checking if dashboard is ready...")
@@ -354,13 +333,7 @@ async def wait_for_dashboard_ready(page: Page) -> bool:
             print("  - Dashboard is still loading")
             print("  - You're not enrolled in any courses")
             print("  - Page layout is different")
-            
-            # Offer to continue anyway or retry
-            retry = input("\nWould you like to retry dashboard detection? (y/n): ").strip().lower()
-            if retry in ['y', 'yes']:
-                return await wait_for_dashboard_ready(page)
-            else:
-                return False
+            return False
             
     except Exception as e:
         print(f"❌ Error checking dashboard: {e}")
@@ -615,17 +588,141 @@ def display_course_selection(courses: List[Tuple[str, str]]) -> int:
             print("\n❌ Selection cancelled")
             return -1
 
+async def scrape_onq_files_with_authentication(browser, context, page, scrape_batch_id: str = None) -> List[Dict]:
+    """
+    Main scraping function that accepts authenticated browser, context, and page objects.
+    Assumes starting from OnQ dashboard (already logged in).
+    """
+    try:
+        if scrape_batch_id is None:
+            scrape_batch_id = datetime.datetime.now().strftime('batch_%Y%m%d-%H%M%S')
+        
+        print(f"🚀 Starting OnQ file scraping (batch: {scrape_batch_id})")
+        
+        # Extract course links from the dashboard
+        courses = await extract_course_links(page)
+        
+        # Handle case when no courses are found automatically
+        if not courses:
+            print("\n⚠️ No courses found automatically.")
+            print("This could be due to:")
+            print("  - Dashboard still loading")
+            print("  - Different page layout")
+            print("  - Session expired")
+            
+            # Offer manual input option
+            use_manual = input("\nWould you like to manually enter course details? (y/n): ").strip().lower()
+            if use_manual in ['y', 'yes']:
+                course_name, course_id = manual_course_input()
+                if course_name and course_id:
+                    courses = [(course_name, course_id)]
+                    selected_course_index = 0
+                else:
+                    print("❌ Manual input cancelled")
+                    return []
+            else:
+                print("❌ No course selected")
+                return []
+        else:
+            # Display course selection
+            selected_course_index = display_course_selection(courses)
+        
+        if selected_course_index != -1:
+            # Get the selected course details
+            selected_course_name, selected_course_id = courses[selected_course_index]
+            print(f"\n🚀 Starting scraping for: {selected_course_name} (ID: {selected_course_id})")
+            
+            # First navigate to the course home page
+            course_home_url = f"https://onq.queensu.ca/d2l/home/{selected_course_id}"
+            print(f"📚 Navigating to course home: {course_home_url}")
+            await page.goto(course_home_url)
+            await page.wait_for_load_state("networkidle")
+            
+            # Now try to navigate to the content page from within the course
+            try:
+                print("🔍 Looking for Content link in course navigation...")
+                # Wait for course navigation to load
+                await page.wait_for_selector('a[href*="content"], [class*="content"], [class*="nav"]', timeout=10000)
+                
+                # Try to find and click the Content link
+                content_selectors = [
+                    'a[href*="/content/"]',
+                    'a:has-text("Content")',
+                    '[class*="content"] a',
+                    '[class*="nav"] a:has-text("Content")',
+                    'a[title*="Content"]',
+                    'a[aria-label*="Content"]'
+                ]
+                
+                content_clicked = False
+                for selector in content_selectors:
+                    try:
+                        content_link = await page.query_selector(selector)
+                        if content_link and await content_link.is_visible():
+                            print(f"✅ Found Content link with selector: {selector}")
+                            await content_link.click()
+                            await page.wait_for_load_state("networkidle")
+                            content_clicked = True
+                            break
+                    except Exception as e:
+                        print(f"  ⚠️ Selector '{selector}' failed: {e}")
+                        continue
+                
+                if not content_clicked:
+                    print("⚠️ Could not find Content link, trying direct navigation...")
+                    # Fallback: try direct navigation to content page
+                    content_url = f"https://onq.queensu.ca/d2l/le/content/{selected_course_id}/Home"
+                    await page.goto(content_url)
+                    await page.wait_for_load_state("networkidle")
+                    
+            except Exception as e:
+                print(f"⚠️ Error navigating to content: {e}")
+                # Try direct navigation as fallback
+                content_url = f"https://onq.queensu.ca/d2l/le/content/{selected_course_id}/Home"
+                print(f"🔄 Trying direct navigation to: {content_url}")
+                await page.goto(content_url)
+                await page.wait_for_load_state("networkidle")
+            
+            # Scrape the files from the selected course
+            files = await scrape_course_files(page, selected_course_id, selected_course_name, scrape_batch_id=scrape_batch_id)
+            
+            # Print results
+            print("\n📋 Scraped Files:")
+            for i, file_info in enumerate(files, 1):
+                print(f"\n{i}. {file_info['filename']}")
+                print(f"   Path: {file_info['path']}")
+                print(f"   Type: {file_info['file_type']}")
+                print(f"   Source: {file_info['source']}")
+            
+            # Show download summary
+            print("\n📁 Downloaded files to 'downloads/' folder:")
+            for file_info in files:
+                print(f"   • {file_info['filename']} ({file_info['file_type']})")
+            
+            return files
+        else:
+            print("No course selected or selected course not found.")
+            return []
+        
+    except Exception as e:
+        print(f"❌ Error during scraping: {e}")
+        return []
+
+
 async def main():
+    """Legacy main function for standalone testing (will be removed in production)."""
     args = parse_scraper_args()
     duplicate_strategy = 'rename'
     if args.overwrite:
         duplicate_strategy = 'overwrite'
     elif args.skip_duplicates:
         duplicate_strategy = 'skip'
+    
     # Generate a scrape_batch_id for this run
     scrape_batch_id = datetime.datetime.now().strftime('batch_%Y%m%d-%H%M%S')
     print(f"[Scraper] Using scrape_batch_id: {scrape_batch_id}")
-    """Main function for local testing."""
+    
+    """Legacy standalone testing function."""
     async with async_playwright() as p:
         try:
             # Launch browser
@@ -649,114 +746,13 @@ async def main():
                 await context.storage_state(path="onq_state.json")
                 print("✅ Session saved to onq_state.json.")
             
-            # Extract course links from the dashboard
-            courses = await extract_course_links(page)
+            # Use the new integrated function
+            files = await scrape_onq_files_with_authentication(browser, context, page, scrape_batch_id)
             
-            # Handle case when no courses are found automatically
-            if not courses:
-                print("\n⚠️ No courses found automatically.")
-                print("This could be due to:")
-                print("  - Dashboard still loading")
-                print("  - Different page layout")
-                print("  - Need to complete 2FA first")
-                
-                # Offer manual input option
-                use_manual = input("\nWould you like to manually enter course details? (y/n): ").strip().lower()
-                if use_manual in ['y', 'yes']:
-                    course_name, course_id = manual_course_input()
-                    if course_name and course_id:
-                        courses = [(course_name, course_id)]
-                        selected_course_index = 0
-                    else:
-                        print("❌ Manual input cancelled")
-                        return
-                else:
-                    print("❌ No course selected")
-                    return
+            if files:
+                print(f"\n✅ Successfully scraped {len(files)} files")
             else:
-                # Display course selection
-                selected_course_index = display_course_selection(courses)
-            
-            if selected_course_index != -1:
-                # Get the selected course details
-                selected_course_name, selected_course_id = courses[selected_course_index]
-                print(f"\n🚀 Starting scraping for: {selected_course_name} (ID: {selected_course_id})")
-                
-                # First navigate to the course home page
-                course_home_url = f"https://onq.queensu.ca/d2l/home/{selected_course_id}"
-                print(f"📚 Navigating to course home: {course_home_url}")
-                await page.goto(course_home_url)
-                await page.wait_for_load_state("networkidle")
-                
-                # Now try to navigate to the content page from within the course
-                try:
-                    print("🔍 Looking for Content link in course navigation...")
-                    # Wait for course navigation to load
-                    await page.wait_for_selector('a[href*="content"], [class*="content"], [class*="nav"]', timeout=10000)
-                    
-                    # Try to find and click the Content link
-                    content_selectors = [
-                        'a[href*="/content/"]',
-                        'a:has-text("Content")',
-                        '[class*="content"] a',
-                        '[class*="nav"] a:has-text("Content")',
-                        'a[title*="Content"]',
-                        'a[aria-label*="Content"]'
-                    ]
-                    
-                    content_clicked = False
-                    for selector in content_selectors:
-                        try:
-                            content_link = await page.query_selector(selector)
-                            if content_link and await content_link.is_visible():
-                                print(f"✅ Found Content link with selector: {selector}")
-                                await content_link.click()
-                                await page.wait_for_load_state("networkidle")
-                                content_clicked = True
-                                break
-                        except Exception as e:
-                            print(f"  ⚠️ Selector '{selector}' failed: {e}")
-                            continue
-                    
-                    if not content_clicked:
-                        print("⚠️ Could not find Content link, trying direct navigation...")
-                        # Fallback: try direct navigation to content page
-                        content_url = f"https://onq.queensu.ca/d2l/le/content/{selected_course_id}/Home"
-                        await page.goto(content_url)
-                        await page.wait_for_load_state("networkidle")
-                        
-                except Exception as e:
-                    print(f"⚠️ Error navigating to content: {e}")
-                    # Try direct navigation as fallback
-                    content_url = f"https://onq.queensu.ca/d2l/le/content/{selected_course_id}/Home"
-                    print(f"🔄 Trying direct navigation to: {content_url}")
-                    await page.goto(content_url)
-                    await page.wait_for_load_state("networkidle")
-                
-                # Scrape the files from the selected course
-                files = await scrape_course_files(page, selected_course_id, selected_course_name, scrape_batch_id=scrape_batch_id)
-                
-                # Print results
-                print("\n📋 Scraped Files:")
-                for i, file_info in enumerate(files, 1):
-                    print(f"\n{i}. {file_info['filename']}")
-                    print(f"   Path: {file_info['path']}")
-                    print(f"   Type: {file_info['file_type']}")
-                    print(f"   Source: {file_info['source']}")
-                
-                # Save to JSON file for inspection (this is now handled in the scraping method)
-                print(f"\n💾 Results saved to course-specific JSON file")
-                
-                # Show download summary
-                # (No reference to 'download_url' since ZIP-based metadata does not include it)
-                print("\n📁 Downloaded files to 'downloads/' folder:")
-                for file_info in files:
-                    print(f"   • {file_info['filename']} ({file_info['file_type']})")
-                
-                # TODO: Send file data to backend or trigger ingestion
-                print("\n📤 TODO: Implement backend integration")
-            else:
-                print("No course selected or selected course not found.")
+                print("\n❌ No files were scraped")
             
         except Exception as e:
             print(f"❌ Error in main: {e}")

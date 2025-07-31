@@ -1,23 +1,23 @@
 import sys
 import json
-import time
+import asyncio
 import os
 import re
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 
-def login_and_get_session(username: str, password: str):
+async def login_and_get_session(username: str, password: str):
     # Set the correct browser path for Windows
     os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "C:\\Users\\colin\\AppData\\Local\\ms-playwright"
     
-    with sync_playwright() as p:
+    async with async_playwright() as p:
         # Try to use the regular Chromium browser with visible UI
         try:
-            browser = p.chromium.launch(headless=False, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            browser = await p.chromium.launch(headless=False, args=["--no-sandbox", "--disable-dev-shm-usage"])
         except Exception as e:
             print(f"Failed to launch Chromium: {e}")
             # Fallback: try to use the system Chrome if available
             try:
-                browser = p.chromium.launch(
+                browser = await p.chromium.launch(
                     headless=False, 
                     args=["--no-sandbox", "--disable-dev-shm-usage"],
                     channel="chrome"  # Use system Chrome
@@ -25,13 +25,13 @@ def login_and_get_session(username: str, password: str):
             except Exception as e2:
                 print(f"Failed to launch system Chrome: {e2}")
                 raise Exception("Could not launch any browser")
-        context = browser.new_context()
-        page = context.new_page()
+        context = await browser.new_context()
+        page = await context.new_page()
 
         try:
             # Navigate to Queen's Brightspace login page
-            page.goto("https://onq.queensu.ca/")
-            time.sleep(3)
+            await page.goto("https://onq.queensu.ca/")
+            await asyncio.sleep(3)
             print(f"Current URL: {page.url}")
 
             # Look for various possible login elements
@@ -46,11 +46,11 @@ def login_and_get_session(username: str, password: str):
             clicked_sso = False
             for selector in login_selectors:
                 try:
-                    if page.locator(selector).is_visible(timeout=2000):
+                    if await page.locator(selector).is_visible(timeout=2000):
                         print(f"Found login button: {selector}")
-                        page.locator(selector).click()
-                        page.wait_for_load_state("networkidle")
-                        time.sleep(2)
+                        await page.locator(selector).click()
+                        await page.wait_for_load_state("networkidle")
+                        await asyncio.sleep(2)
                         clicked_sso = True
                         break
                 except:
@@ -64,22 +64,22 @@ def login_and_get_session(username: str, password: str):
                 print("Detected Microsoft login page")
                 
                 # Wait for page to fully load
-                page.wait_for_load_state("networkidle")
-                time.sleep(3)
+                await page.wait_for_load_state("networkidle")
+                await asyncio.sleep(3)
                 
                 # Wait for Microsoft login form with longer timeout
                 try:
-                    page.wait_for_selector('input[type="email"], input[name="loginfmt"], input[name="email"], input[type="text"]', timeout=15000)
+                    await page.wait_for_selector('input[type="email"], input[name="loginfmt"], input[name="email"], input[type="text"]', timeout=15000)
                 except:
                     print("Timeout waiting for login form, trying to continue anyway...")
                 
                 # Debug: print all input elements on the page
-                inputs = page.query_selector_all('input')
+                inputs = await page.query_selector_all('input')
                 print(f"Found {len(inputs)} input elements on the page:")
                 for i, inp in enumerate(inputs):
-                    input_type = inp.get_attribute('type') or 'no-type'
-                    input_name = inp.get_attribute('name') or 'no-name'
-                    input_id = inp.get_attribute('id') or 'no-id'
+                    input_type = await inp.get_attribute('type') or 'no-type'
+                    input_name = await inp.get_attribute('name') or 'no-name'
+                    input_id = await inp.get_attribute('id') or 'no-id'
                     print(f"  Input {i}: type='{input_type}', name='{input_name}', id='{input_id}'")
                 
                 # Try to find the email field on Microsoft's page
@@ -89,7 +89,7 @@ def login_and_get_session(username: str, password: str):
                 for selector in ms_username_selectors:
                     try:
                         element = page.locator(selector)
-                        if element.count() > 0:
+                        if await element.count() > 0:
                             username_field = selector
                             print(f"Found Microsoft username field: {selector}")
                             break
@@ -100,7 +100,7 @@ def login_and_get_session(username: str, password: str):
                 if not username_field:
                     # Fallback: try by ID since we know it's 'i0116'
                     try:
-                        if page.locator('#i0116').count() > 0:
+                        if await page.locator('#i0116').count() > 0:
                             username_field = '#i0116'
                             print("Found Microsoft username field by ID: #i0116")
                     except:
@@ -108,7 +108,8 @@ def login_and_get_session(username: str, password: str):
                 
                 if not username_field:
                     print("Could not find username field on Microsoft page")
-                    print(f"Page content: {page.content()[:1000]}...")
+                    page_content = await page.content()
+                    print(f"Page content: {page_content[:1000]}...")
                     raise Exception("Username field not found on Microsoft login page")
                 
                 # Fill in username (NetID@queensu.ca format)
@@ -117,7 +118,7 @@ def login_and_get_session(username: str, password: str):
                 else:
                     full_username = username
                 
-                page.fill(username_field, full_username)
+                await page.fill(username_field, full_username)
                 print(f"Filled username: {full_username}")
                 
             else:
@@ -127,7 +128,7 @@ def login_and_get_session(username: str, password: str):
                 
                 for selector in username_selectors:
                     try:
-                        if page.locator(selector).is_visible(timeout=3000):
+                        if await page.locator(selector).is_visible(timeout=3000):
                             username_field = selector
                             print(f"Found username field: {selector}")
                             break
@@ -136,11 +137,12 @@ def login_and_get_session(username: str, password: str):
                 
                 if not username_field:
                     print("Could not find username field")
-                    print(f"Page content: {page.content()[:500]}...")
+                    page_content = await page.content()
+                    print(f"Page content: {page_content[:500]}...")
                     raise Exception("Username field not found")
 
                 # Fill in username
-                page.fill(username_field, username)
+                await page.fill(username_field, username)
                 print("Filled username")
             
             # Look for submit button
@@ -149,11 +151,11 @@ def login_and_get_session(username: str, password: str):
             
             for selector in submit_selectors:
                 try:
-                    if page.locator(selector).is_visible(timeout=2000):
+                    if await page.locator(selector).is_visible(timeout=2000):
                         print(f"Found submit button: {selector}")
-                        page.locator(selector).click()
-                        page.wait_for_load_state("networkidle")
-                        time.sleep(2)
+                        await page.locator(selector).click()
+                        await page.wait_for_load_state("networkidle")
+                        await asyncio.sleep(2)
                         submit_clicked = True
                         break
                 except:
@@ -161,25 +163,25 @@ def login_and_get_session(username: str, password: str):
             
             if not submit_clicked:
                 print("Could not find submit button, trying to press Enter")
-                page.keyboard.press("Enter")
-                time.sleep(2)
+                await page.keyboard.press("Enter")
+                await asyncio.sleep(2)
             
             print(f"Current URL after username: {page.url}")
 
             # Wait for password field
-            page.wait_for_selector('input[type="password"]', timeout=10000)
-            page.fill('input[type="password"]', password)
+            await page.wait_for_selector('input[type="password"]', timeout=10000)
+            await page.fill('input[type="password"]', password)
             print("Filled password")
             
             # Submit password
             submit_clicked = False
             for selector in submit_selectors:
                 try:
-                    if page.locator(selector).is_visible(timeout=2000):
+                    if await page.locator(selector).is_visible(timeout=2000):
                         print(f"Found password submit button: {selector}")
-                        page.locator(selector).click()
-                        page.wait_for_load_state("networkidle")
-                        time.sleep(3)
+                        await page.locator(selector).click()
+                        await page.wait_for_load_state("networkidle")
+                        await asyncio.sleep(3)
                         submit_clicked = True
                         break
                 except:
@@ -187,14 +189,14 @@ def login_and_get_session(username: str, password: str):
             
             if not submit_clicked:
                 print("Could not find password submit button, trying to press Enter")
-                page.keyboard.press("Enter")
-                time.sleep(3)
+                await page.keyboard.press("Enter")
+                await asyncio.sleep(3)
             
             print(f"Current URL after password: {page.url}")
             
             # Wait for potential 2FA or redirect
             print("Waiting for login result or 2FA prompt...")
-            time.sleep(10)  # Wait longer for 2FA to appear
+            await asyncio.sleep(10)  # Wait longer for 2FA to appear
             
             # Check if we're still on the same page or if there's been a redirect
             current_url = page.url
@@ -202,27 +204,28 @@ def login_and_get_session(username: str, password: str):
             
             # Wait for any page changes
             try:
-                page.wait_for_load_state("networkidle", timeout=15000)
+                await page.wait_for_load_state("networkidle", timeout=15000)
             except:
                 print("Page load timeout, continuing anyway...")
             
             # Check for 2FA prompts or success
             current_url = page.url
-            page_content = page.content().lower()
+            page_content = (await page.content()).lower()
             
             # --- Direct selector-based 2FA number detection ---
             print("Attempting direct selector-based 2FA number detection...")
-            print(f"Page title: {page.title()}")
+            page_title = await page.title()
+            print(f"Page title: {page_title}")
             
             twofa_number = None
             
             # Try to get 2FA number directly from the Microsoft Authenticator display element
             try:
                 print("Looking for 2FA number using selector '#idRichContext_DisplaySign'...")
-                display_sign_element = page.wait_for_selector('#idRichContext_DisplaySign', timeout=30000)
+                display_sign_element = await page.wait_for_selector('#idRichContext_DisplaySign', timeout=30000)
                 
                 if display_sign_element:
-                    element_text = display_sign_element.inner_text().strip()
+                    element_text = (await display_sign_element.inner_text()).strip()
                     print(f"Found #idRichContext_DisplaySign element with text: '{element_text}'")
                     
                     # Extract 2-digit number from the element
@@ -245,7 +248,7 @@ def login_and_get_session(username: str, password: str):
                 print("Using fallback line-by-line targeted detection...")
                 
                 # 1. Collect all 2-digit numbers and their line context from visible elements
-                visible_elements = page.query_selector_all('p, div, span, h1, h2, h3, h4, h5, h6, label, button')
+                visible_elements = await page.query_selector_all('p, div, span, h1, h2, h3, h4, h5, h6, label, button')
                 all_candidates = []  # List of (number, line_text, element_full_text, line_index)
             
                 target_phrases = [
@@ -261,8 +264,8 @@ def login_and_get_session(username: str, password: str):
                 
                 for element in visible_elements:
                     try:
-                        if element.is_visible():
-                            full_text = element.inner_text().strip()
+                        if await element.is_visible():
+                            full_text = (await element.inner_text()).strip()
                             if full_text and len(full_text) > 0:
                                 # Split element text into lines
                                 lines = [line.strip() for line in full_text.split('\n') if line.strip()]
@@ -386,11 +389,12 @@ def login_and_get_session(username: str, password: str):
                 
                 # Wait for post-2FA events: "Stay signed in?" or OnQ dashboard
                 print("Waiting for 2FA completion - monitoring for 'Stay signed in?' prompt or OnQ dashboard...")
+                import time
                 start_time = time.time()
                 timeout_seconds = 120  # 2 minutes
                 
                 while time.time() - start_time < timeout_seconds:
-                    time.sleep(1)
+                    await asyncio.sleep(1)
                     current_url = page.url
                     
                     # Event 1: Check for "Stay Signed In" page - both URL and DOM detection
@@ -411,7 +415,7 @@ def login_and_get_session(username: str, password: str):
                         
                         for selector in no_button_selectors:
                             try:
-                                if page.locator(selector).is_visible():  # No timeout argument
+                                if await page.locator(selector).is_visible():  # No timeout argument
                                     stay_signed_in_detected = True
                                     detection_method = f"DOM detection: found button '{selector}'"
                                     break
@@ -432,9 +436,9 @@ def login_and_get_session(username: str, password: str):
                         
                         # Try primary selector: input#idBtn_Back
                         try:
-                            if page.locator('input#idBtn_Back').is_visible():
+                            if await page.locator('input#idBtn_Back').is_visible():
                                 print("Found 'No' button with primary selector: input#idBtn_Back")
-                                page.click('input#idBtn_Back')
+                                await page.click('input#idBtn_Back')
                                 clicked_no = True
                                 click_method = "Primary selector: input#idBtn_Back"
                         except Exception as e:
@@ -443,9 +447,9 @@ def login_and_get_session(username: str, password: str):
                         # Try fallback selector if primary failed
                         if not clicked_no:
                             try:
-                                if page.locator('input[type="button"][value="No"]').is_visible():
+                                if await page.locator('input[type="button"][value="No"]').is_visible():
                                     print("Found 'No' button with fallback selector: input[type=\"button\"][value=\"No\"]")
-                                    page.click('input[type="button"][value="No"]')
+                                    await page.click('input[type="button"][value="No"]')
                                     clicked_no = True
                                     click_method = "Fallback selector: input[type=\"button\"][value=\"No\"]"
                             except Exception as e:
@@ -458,20 +462,20 @@ def login_and_get_session(username: str, password: str):
                             # Close all new tabs and refocus on original
                             for i in range(initial_pages, current_pages):
                                 try:
-                                    context.pages[i].close()
+                                    await context.pages[i].close()
                                     print(f"Closed new tab {i}")
                                 except:
                                     pass
                             # Ensure we're focused on the original page
-                            page.bring_to_front()
+                            await page.bring_to_front()
                             print("Refocused on original tab")
                         
                         # Keyboard navigation as last resort
                         if not clicked_no:
                             print("Both selectors failed - attempting keyboard navigation (Tab+Enter)")
                             try:
-                                page.keyboard.press("Tab")
-                                page.keyboard.press("Enter")
+                                await page.keyboard.press("Tab")
+                                await page.keyboard.press("Enter")
                                 clicked_no = True
                                 click_method = "Keyboard navigation: Tab+Enter"
                             except Exception as e:
@@ -481,10 +485,10 @@ def login_and_get_session(username: str, password: str):
                             print(f"Successfully handled 'Stay signed in?' prompt using method: {click_method}")
                             print("Waiting for navigation to dashboard...")
                             try:
-                                page.wait_for_load_state("networkidle", timeout=10000)
+                                await page.wait_for_load_state("networkidle", timeout=10000)
                             except:
                                 print("Navigation timeout, continuing anyway...")
-                            time.sleep(2)
+                            await asyncio.sleep(2)
                         else:
                             print("WARNING: All methods failed to click 'No' button")
                         
@@ -501,7 +505,7 @@ def login_and_get_session(username: str, password: str):
                         print(f"EVENT DETECTED: OnQ dashboard URL at: {current_url}")
                         
                         # Wait a moment for dashboard elements to load
-                        time.sleep(2)
+                        await asyncio.sleep(2)
                         
                         # Check for dashboard-specific elements
                         dashboard_selectors = [
@@ -513,7 +517,7 @@ def login_and_get_session(username: str, password: str):
                         dashboard_element_found = False
                         for selector in dashboard_selectors:
                             try:
-                                if page.locator(selector).is_visible(timeout=3000):
+                                if await page.locator(selector).is_visible(timeout=3000):
                                     print(f"Dashboard element confirmed with selector: {selector}")
                                     dashboard_element_found = True
                                     break
@@ -521,7 +525,7 @@ def login_and_get_session(username: str, password: str):
                                 continue
                         
                         # Also check for dashboard text content
-                        page_content = page.content()
+                        page_content = await page.content()
                         dashboard_text_found = any(text in page_content for text in ["Dashboard", "My Courses"])
                         
                         if dashboard_element_found or dashboard_text_found:
@@ -543,7 +547,7 @@ def login_and_get_session(username: str, password: str):
             print(f"Exception occurred: {str(e)}")
             raise e
 
-if __name__ == "__main__":
+async def main():
     if len(sys.argv) < 3:
         print("Usage: python playwright_scraper_runner.py <username> <password>")
         sys.exit(1)
@@ -553,7 +557,7 @@ if __name__ == "__main__":
     
     try:
         print("Starting login process...")
-        browser, context, page = login_and_get_session(username, password)
+        browser, context, page = await login_and_get_session(username, password)
         print("Login function completed successfully!")
         print(f"Browser object: {browser}")
         print(f"Context object: {context}")
@@ -563,8 +567,11 @@ if __name__ == "__main__":
         
         # Keep the script running so browser stays open
         input("Press Enter to close the browser and exit...")
-        browser.close()
+        await browser.close()
         
     except Exception as e:
         print(f"Login failed with error: {str(e)}")
-        sys.exit(1) 
+        sys.exit(1)
+
+if __name__ == "__main__":
+    asyncio.run(main()) 
