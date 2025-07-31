@@ -51,3 +51,12 @@ backend/lms_scraper/ingestion_log.json
 # Ignore scraped HTML/CSS files
 backend/lms_scraper/downloads/**/*.html
 backend/lms_scraper/downloads/**/*.css
+
+# Ignore all downloads (scraped/output files)
+backend/downloads/
+downloads/
+*.zip
+*.pdf
+*.html
+*.json
+*.css

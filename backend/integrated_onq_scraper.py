@@ -21,6 +21,7 @@ import getpass
 import sys
 import os
 from typing import List, Dict
+from playwright.async_api import async_playwright
 
 # Add the current directory to Python path to ensure imports work
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -77,44 +78,47 @@ async def main():
         print(f"❌ Error getting credentials: {e}")
         return
     
-    # Step 2: Perform async login
-    print("\n🚀 Step 1: Logging into OnQ...")
+    # Step 2: Initialize Playwright context and perform async login
+    print("\n🚀 Step 1: Initializing browser and logging into OnQ...")
     browser = None
-    try:
-        browser, context, page = await login_and_get_session(username, password)
-        print("✅ Login successful! OnQ dashboard loaded.")
-        print(f"📍 Current URL: {page.url}")
-    except Exception as e:
-        print(f"❌ Login failed: {e}")
-        return
-    
-    # Step 3: Run async scraping
-    print("\n🗂️ Step 2: Starting file scraping...")
     files = []
-    try:
-        import datetime
-        scrape_batch_id = datetime.datetime.now().strftime('batch_%Y%m%d-%H%M%S')
-        print(f"📋 Scrape batch ID: {scrape_batch_id}")
-        
-        files = await scrape_onq_files_with_authentication(
-            browser, 
-            context, 
-            page, 
-            scrape_batch_id
-        )
-    except Exception as e:
-        print(f"❌ Scraping failed: {e}")
-    finally:
-        # Step 4: Clean up browser
-        print("\n🧹 Step 3: Cleaning up...")
-        try:
-            if browser:
-                await browser.close()
-                print("✅ Browser closed successfully")
-        except Exception as e:
-            print(f"⚠️ Warning: Error closing browser: {e}")
     
-    # Step 5: Report results
+    async with async_playwright() as p:
+        try:
+            browser, context, page = await login_and_get_session(p, username, password)
+            print("✅ Login successful! OnQ dashboard loaded.")
+            print(f"📍 Current URL: {page.url}")
+            
+            # Step 3: Run async scraping (inside the Playwright context)
+            print("\n🗂️ Step 2: Starting file scraping...")
+            try:
+                import datetime
+                scrape_batch_id = datetime.datetime.now().strftime('batch_%Y%m%d-%H%M%S')
+                print(f"📋 Scrape batch ID: {scrape_batch_id}")
+                
+                files = await scrape_onq_files_with_authentication(
+                    browser, 
+                    context, 
+                    page, 
+                    scrape_batch_id
+                )
+            except Exception as e:
+                print(f"❌ Scraping failed: {e}")
+            
+        except Exception as e:
+            print(f"❌ Login failed: {e}")
+            return
+        finally:
+            # Step 4: Clean up browser (happens automatically when context exits)
+            print("\n🧹 Step 3: Cleaning up...")
+            try:
+                if browser:
+                    await browser.close()
+                    print("✅ Browser closed successfully")
+            except Exception as e:
+                print(f"⚠️ Warning: Error closing browser: {e}")
+    
+    # Step 5: Report results (outside the Playwright context)
     print("\n📊 Final Results")
     print("=" * 30)
     if files:
