@@ -588,10 +588,18 @@ def display_course_selection(courses: List[Tuple[str, str]]) -> int:
             print("\n❌ Selection cancelled")
             return -1
 
-async def scrape_onq_files_with_authentication(browser, context, page, scrape_batch_id: str = None) -> List[Dict]:
+async def scrape_onq_files_with_authentication(browser, context, page, scrape_batch_id: str = None) -> Dict:
     """
     Main scraping function that accepts authenticated browser, context, and page objects.
     Assumes starting from OnQ dashboard (already logged in).
+    
+    Returns:
+        Dict with keys:
+        - 'files': List of file dictionaries
+        - 'course_id': Selected course ID
+        - 'course_name': Selected course name
+        - 'course_json_path': Path to the course metadata JSON file
+        - 'scrape_batch_id': The batch ID used for scraping
     """
     try:
         if scrape_batch_id is None:
@@ -619,10 +627,10 @@ async def scrape_onq_files_with_authentication(browser, context, page, scrape_ba
                     selected_course_index = 0
                 else:
                     print("❌ Manual input cancelled")
-                    return []
+                    return {'files': [], 'course_id': None, 'course_name': None, 'course_json_path': None, 'scrape_batch_id': scrape_batch_id}
             else:
                 print("❌ No course selected")
-                return []
+                return {'files': [], 'course_id': None, 'course_name': None, 'course_json_path': None, 'scrape_batch_id': scrape_batch_id}
         else:
             # Display course selection
             selected_course_index = display_course_selection(courses)
@@ -699,14 +707,24 @@ async def scrape_onq_files_with_authentication(browser, context, page, scrape_ba
             for file_info in files:
                 print(f"   • {file_info['filename']} ({file_info['file_type']})")
             
-            return files
+            # Construct the course JSON path
+            safe_course_name = sanitize_filename(selected_course_name)
+            course_json_path = os.path.join("downloads", f'course_files_from_zip_{selected_course_id}_{safe_course_name}.json')
+            
+            return {
+                'files': files,
+                'course_id': selected_course_id,
+                'course_name': selected_course_name,
+                'course_json_path': course_json_path,
+                'scrape_batch_id': scrape_batch_id
+            }
         else:
             print("No course selected or selected course not found.")
-            return []
+            return {'files': [], 'course_id': None, 'course_name': None, 'course_json_path': None, 'scrape_batch_id': scrape_batch_id}
         
     except Exception as e:
         print(f"❌ Error during scraping: {e}")
-        return []
+        return {'files': [], 'course_id': None, 'course_name': None, 'course_json_path': None, 'scrape_batch_id': scrape_batch_id}
 
 
 async def main():
@@ -747,7 +765,8 @@ async def main():
                 print("✅ Session saved to onq_state.json.")
             
             # Use the new integrated function
-            files = await scrape_onq_files_with_authentication(browser, context, page, scrape_batch_id)
+            scrape_result = await scrape_onq_files_with_authentication(browser, context, page, scrape_batch_id)
+            files = scrape_result.get('files', [])
             
             if files:
                 print(f"\n✅ Successfully scraped {len(files)} files")
