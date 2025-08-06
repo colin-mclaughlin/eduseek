@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardHeader, CardContent, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import LMSImportForm from "./lms/LMSImportForm";
+import OnQSyncModal from "./OnQSyncModal";
+import { useToast } from "./ui/toast";
 
 interface FileData {
   id: number;
@@ -12,16 +13,16 @@ interface FileData {
   deadlines: string[];
 }
 
-function formatDeadline(deadline: string | null): string | null {
-  if (!deadline) return null;
-  const date = new Date(deadline);
-  if (isNaN(date.getTime())) return null;
-  return `Due ${date.toLocaleDateString(undefined, {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  })}`;
-}
+// function formatDeadline(deadline: string | null): string | null {
+//   if (!deadline) return null;
+//   const date = new Date(deadline);
+//   if (isNaN(date.getTime())) return null;
+//   return `Due ${date.toLocaleDateString(undefined, {
+//     month: "long",
+//     day: "numeric",
+//     year: "numeric",
+//   })}`;
+// }
 
 // Since uploaded_at is not available in the API response,
 // we'll sort by filename for now
@@ -32,7 +33,10 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
   const [error, setError] = useState<string | null>(null);
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const [loadingSuggestion, setLoadingSuggestion] = useState(false);
+  const [showOnQModal, setShowOnQModal] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   // Refetch files from backend
   const fetchFiles = useCallback(() => {
@@ -44,7 +48,7 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
         const data = await res.json();
         setFiles(Array.isArray(data) ? data : []);
       })
-      .catch((err) => {
+      .catch(() => {
         setError("Error loading files. Please try again later.");
         setFiles([]);
       })
@@ -53,7 +57,7 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
 
   useEffect(() => {
     fetchFiles();
-  }, [fetchFiles, triggerRefresh]);
+  }, [fetchFiles, triggerRefresh, refreshTrigger]);
 
   const handleGetSuggestion = async () => {
     setLoadingSuggestion(true);
@@ -67,6 +71,17 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
     } finally {
       setLoadingSuggestion(false);
     }
+  };
+
+  const handleOnQSyncSuccess = (results: any) => {
+    // Trigger a refresh of the dashboard
+    setRefreshTrigger(prev => prev + 1);
+    // Show success toast
+    showToast(
+      `OnQ sync completed! ${results.uploaded || 0} files uploaded successfully.`, 
+      "success"
+    );
+    console.log("OnQ sync completed successfully:", results);
   };
 
   if (loading) {
@@ -258,11 +273,25 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
         </CardContent>
       </Card>
 
-      {/* LMS Import Section */}
-      <div>
-        <h3 className="text-lg font-semibold mb-2">Import Course Files from LMS</h3>
-        <LMSImportForm />
-      </div>
+      {/* OnQ Sync Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            🎓 Sync from OnQ
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-4">
+            Automatically import all your course files and deadlines from Queen's OnQ platform.
+          </p>
+          <Button 
+            onClick={() => setShowOnQModal(true)}
+            className="w-full"
+          >
+            Sync from OnQ
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Quick Access Shortcuts */}
       <div className="grid grid-cols-2 gap-4">
@@ -295,6 +324,13 @@ export const DashboardView: React.FC<{ triggerRefresh?: boolean }> = ({ triggerR
           ⚙️ Settings (coming soon)
         </Button>
       </div>
+
+      {/* OnQ Sync Modal */}
+      <OnQSyncModal
+        isOpen={showOnQModal}
+        onClose={() => setShowOnQModal(false)}
+        onSuccess={handleOnQSyncSuccess}
+      />
     </div>
   );
 };

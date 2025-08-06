@@ -78,7 +78,7 @@ def append_to_ingestion_log(log_entries):
         log = []
     log.extend(log_entries)
     with open(INGESTION_LOG, 'w', encoding='utf-8') as f:
-        json.dump(log, f, indent=2)
+        json.dump(log, f, ensure_ascii=False, indent=2)
 
 def upload_file(file_path, entry, upload_url, course_id=None, course_name=None, scrape_batch_id=None):
     """Upload a single file to the backend with course context and content_hash."""
@@ -99,20 +99,20 @@ def upload_file(file_path, entry, upload_url, course_id=None, course_name=None, 
             resp = requests.post(upload_url, files=files, data=data, timeout=120)
         if resp.status_code == 200:
             result = resp.json()
-            print(f"  ✅ Uploaded: {entry['filename']} → ID: {result.get('id', 'N/A')}")
+            print(f"  SUCCESS: Uploaded: {entry['filename']} → ID: {result.get('id', 'N/A')}")
             return 'uploaded', content_hash
         elif resp.status_code == 409:
-            print(f"  ⏭️ Skipped duplicate: {entry['filename']} (already exists on backend)")
+            print(f"  SKIPPED: Skipped duplicate: {entry['filename']} (already exists on backend)")
             return 'duplicate', content_hash
         else:
-            print(f"  ❌ Failed: {entry['filename']} (HTTP {resp.status_code}): {resp.text}")
+            print(f"  ERROR: Failed: {entry['filename']} (HTTP {resp.status_code}): {resp.text}")
             return 'failed', content_hash
     except Exception as e:
         print(f"  💥 Error uploading {entry['filename']}: {e}")
         return 'failed', None
 
 def ingest_course_json(json_path, backend_url, course_id_override=None, course_name_override=None, scrape_batch_id=None):
-    print(f"\n📋 Ingesting course JSON: {json_path}")
+    print(f"\nLIST: Ingesting course JSON: {json_path}")
     upload_url = backend_url.rstrip('/') + UPLOAD_ENDPOINT_PATH
     with open(json_path, 'r', encoding='utf-8') as f:
         entries = json.load(f)
@@ -128,7 +128,7 @@ def ingest_course_json(json_path, backend_url, course_id_override=None, course_n
     for entry in entries:
         file_path = os.path.join(DOWNLOADS_DIR, entry['path'])
         if not os.path.exists(file_path):
-            print(f"  ⚠️ Missing file: {file_path}")
+            print(f"  WARNING: Missing file: {file_path}")
             missing += 1
             log_entries.append({
                 'filename': entry['filename'],
@@ -160,7 +160,7 @@ def ingest_course_json(json_path, backend_url, course_id_override=None, course_n
             failed += 1
         time.sleep(0.2)
     append_to_ingestion_log(log_entries)
-    print(f"   ✅ Uploaded: {uploaded} | ⏭️ Duplicates: {duplicate} | ❌ Failed: {failed} | ⚠️ Missing: {missing}")
+    print(f"   SUCCESS: Uploaded: {uploaded} | SKIPPED: Duplicates: {duplicate} | ERROR: Failed: {failed} | WARNING: Missing: {missing}")
     return uploaded, duplicate, failed, missing
 
 def main():
@@ -171,7 +171,7 @@ def main():
     if args.all:
         json_files = get_course_json_files()
         if not json_files:
-            print(f"❌ No course JSON files found in {DOWNLOADS_DIR}/")
+            print(f"ERROR: No course JSON files found in {DOWNLOADS_DIR}/")
             sys.exit(1)
         for json_path in json_files:
             u, d, f, m = ingest_course_json(json_path, backend_url, scrape_batch_id=scrape_batch_id)
@@ -181,7 +181,7 @@ def main():
             total_missing += m
     else:
         if not os.path.exists(args.course_json):
-            print(f"❌ Course JSON not found: {args.course_json}")
+            print(f"ERROR: Course JSON not found: {args.course_json}")
             sys.exit(1)
         u, d, f, m = ingest_course_json(
             args.course_json, backend_url, args.course_id, args.course_name, scrape_batch_id=scrape_batch_id
@@ -192,9 +192,9 @@ def main():
         total_missing += m
     print("\n============================")
     print(f"🎉 Uploaded: {total_uploaded}")
-    print(f"⏭️ Duplicates skipped: {total_duplicate}")
-    print(f"❌ Failed: {total_failed}")
-    print(f"⚠️ Missing: {total_missing}")
+    print(f"SKIPPED: Duplicates skipped: {total_duplicate}")
+    print(f"ERROR: Failed: {total_failed}")
+    print(f"WARNING: Missing: {total_missing}")
     print(f"📝 Ingestion log updated: {INGESTION_LOG}")
     print("============================\n")
     if total_failed > 0:

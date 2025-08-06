@@ -5,7 +5,7 @@ import os
 import re
 from playwright.async_api import async_playwright
 
-async def login_and_get_session(p, username: str, password: str):
+async def login_and_get_session(p, username: str, password: str, status_callback=None):
     # Set the correct browser path for Windows
     os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "C:\\Users\\colin\\AppData\\Local\\ms-playwright"
     
@@ -377,7 +377,7 @@ async def login_and_get_session(p, username: str, password: str):
         # Check if already at dashboard
         if success:
             print(f"Login successful - dashboard already detected at: {current_url}")
-            return browser, context, page
+            return browser, context, page, None
         
         # Handle 2FA if required
         if twofa_required:
@@ -385,6 +385,16 @@ async def login_and_get_session(p, username: str, password: str):
             if twofa_number:
                 message = f"Two-factor authentication required - enter {twofa_number} on your phone"
             print(f"2FA detected: {message}")
+            
+            # Update status with 2FA information
+            if status_callback and twofa_number:
+                await status_callback("awaiting_2fa", 25, "Two-factor authentication required", twofa_number=twofa_number)
+            elif status_callback:
+                await status_callback("awaiting_2fa", 25, "Two-factor authentication required", twofa_number=None)
+            
+            # Return 2FA info so the caller can handle status updates
+            if twofa_number:
+                print(f">>> ENTER THIS NUMBER ON YOUR AUTHENTICATOR APP: {twofa_number} <<<")
             
             # Wait for post-2FA events: "Stay signed in?" or OnQ dashboard
             print("Waiting for 2FA completion - monitoring for 'Stay signed in?' prompt or OnQ dashboard...")
@@ -528,8 +538,12 @@ async def login_and_get_session(p, username: str, password: str):
                     dashboard_text_found = any(text in page_content for text in ["Dashboard", "My Courses"])
                     
                     if dashboard_element_found or dashboard_text_found:
+                        # Clear 2FA status when successfully completing login
+                        if status_callback:
+                            await status_callback("login_complete", 30, "Two-factor authentication completed successfully", twofa_number=None)
+                        
                         print(f"SUCCESS: OnQ dashboard fully loaded and confirmed at: {current_url}")
-                        return browser, context, page
+                        return browser, context, page, twofa_number
                     else:
                         print("OnQ URL detected but dashboard elements not yet loaded, continuing to wait...")
                         continue

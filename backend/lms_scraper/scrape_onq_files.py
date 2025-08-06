@@ -9,6 +9,7 @@ import zipfile
 import argparse
 import datetime
 import shutil
+import sys
 
 # Set the correct browser path for Windows
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "C:\\Users\\colin\\AppData\\Local\\ms-playwright"
@@ -85,14 +86,14 @@ class OnQFileScraper:
             
             # Check if we're redirected to login page
             if "login.microsoftonline.com" in self.page.url or "signin" in self.page.url.lower():
-                print("❌ Session expired - redirected to login page")
+                print("ERROR: Session expired - redirected to login page")
                 print("💡 Delete onq_state.json to re-authenticate")
                 return False
                 
-            print("✅ Session is valid")
+            print("SUCCESS: Session is valid")
             return True
         except Exception as e:
-            print(f"❌ Error validating session: {e}")
+            print(f"ERROR: Error validating session: {e}")
             return False
     
     async def navigate_to_course_content(self) -> bool:
@@ -107,17 +108,17 @@ class OnQFileScraper:
             
             # Wait for content to load
             await self.page.wait_for_selector('a.d2l-link[href*="/viewContent/"]', timeout=10000)
-            print("✅ Successfully navigated to course content")
+            print("SUCCESS: Successfully navigated to course content")
             return True
             
         except Exception as e:
-            print(f"❌ Error navigating to course content: {e}")
+            print(f"ERROR: Error navigating to course content: {e}")
             return False
     
     async def scrape_course_files(self, course_name: str = "Unknown Course", scrape_batch_id: str = None) -> List[Dict]:
         """Main method to scrape all course files using Table of Contents ZIP method."""
         try:
-            print(f"🚀 Starting course file scraping for: {course_name}")
+            print(f"STARTING: Starting course file scraping for: {course_name}")
             
             # Validate session first
             if not await self.validate_session():
@@ -146,7 +147,7 @@ class OnQFileScraper:
                     except Exception:
                         continue
                 if not toc_clicked:
-                    print("❌ Could not find Table of Contents tab. Make sure you are on the Content page.")
+                    print("ERROR: Could not find Table of Contents tab. Make sure you are on the Content page.")
                     return []
                 
                 # Wait for overlays to disappear
@@ -156,7 +157,7 @@ class OnQFileScraper:
                     pass  # If overlay not found, continue
                 await asyncio.sleep(0.5)  # Small extra delay
             except Exception as e:
-                print(f"❌ Error navigating to Table of Contents: {e}")
+                print(f"ERROR: Error navigating to Table of Contents: {e}")
                 return []
             
             # Wait for Download button and handle DOM detachment issues
@@ -171,12 +172,12 @@ class OnQFileScraper:
                 # Re-query the button right before clicking to avoid DOM detachment
                 download_btn = await self.page.query_selector('button.d2l-button:has-text("Download")')
                 if not download_btn:
-                    print("❌ Could not find Download button. Make sure you are on the Table of Contents page.")
+                    print("ERROR: Could not find Download button. Make sure you are on the Table of Contents page.")
                     return []
                 
                 # Check if button is still attached and visible
                 if not await download_btn.is_visible():
-                    print("❌ Download button is not visible. Trying alternative approach...")
+                    print("ERROR: Download button is not visible. Trying alternative approach...")
                     # Try clicking by selector instead of element handle
                     async with self.page.expect_download(timeout=30000) as download_info:
                         await self.page.click('button.d2l-button:has-text("Download")')
@@ -192,17 +193,17 @@ class OnQFileScraper:
                 zip_path_raw = os.path.join(downloads_dir, sanitize_filename(download.suggested_filename))
                 zip_path, zip_action = get_unique_filename(zip_path_raw, 'rename')
                 if zip_path is None:
-                    print(f"⏭️ Skipped ZIP (duplicate exists): {zip_path_raw}")
+                    print(f"SKIPPED: Skipped ZIP (duplicate exists): {zip_path_raw}")
                     return []
                 if zip_action == 'rename':
                     print(f"📝 Renamed ZIP to avoid duplicate: {zip_path}")
                 elif zip_action == 'overwrite':
-                    print(f"⚠️ Overwriting existing ZIP: {zip_path}")
+                    print(f"WARNING: Overwriting existing ZIP: {zip_path}")
                 await download.save_as(zip_path)
                 print(f"Saved ZIP to: {zip_path}")
                 
             except Exception as e:
-                print(f"❌ Failed to download ZIP: {e}")
+                print(f"ERROR: Failed to download ZIP: {e}")
                 print("🔄 Trying alternative download method...")
                 try:
                     # Alternative: try clicking by selector directly
@@ -213,9 +214,9 @@ class OnQFileScraper:
                     os.makedirs(downloads_dir, exist_ok=True)
                     zip_path = os.path.join(downloads_dir, sanitize_filename(download.suggested_filename))
                     await download.save_as(zip_path)
-                    print(f"✅ Saved ZIP to: {zip_path}")
+                    print(f"SUCCESS: Saved ZIP to: {zip_path}")
                 except Exception as e2:
-                    print(f"❌ Alternative download method also failed: {e2}")
+                    print(f"ERROR: Alternative download method also failed: {e2}")
                     return []
             
             # Extract and parse ZIP
@@ -234,14 +235,14 @@ class OnQFileScraper:
                                 os.makedirs(out_dir, exist_ok=True)
                             out_path, file_action = get_unique_filename(out_path_raw, 'rename')
                             if out_path is None:
-                                print(f"⏭️ Skipped extracted file (duplicate exists): {out_path_raw}")
+                                print(f"SKIPPED: Skipped extracted file (duplicate exists): {out_path_raw}")
                                 extracted_skipped += 1
                                 continue
                             if file_action == 'rename':
                                 print(f"📝 Renamed extracted file to avoid duplicate: {out_path}")
                                 extracted_renamed += 1
                             elif file_action == 'overwrite':
-                                print(f"⚠️ Overwriting existing file: {out_path}")
+                                print(f"WARNING: Overwriting existing file: {out_path}")
                                 extracted_overwritten += 1
                             # Actually copy the file, preserving subfolders
                             shutil.copy2(os.path.join(root, fname), out_path)
@@ -263,14 +264,14 @@ class OnQFileScraper:
                     safe_course_name = sanitize_filename(course_name)
                     output_path = os.path.join(downloads_dir, f'course_files_from_zip_{self.course_id}_{safe_course_name}.json')
                     with open(output_path, 'w', encoding='utf-8') as f:
-                        json.dump(file_list, f, indent=2)
-                    print(f"✅ Saved file metadata to {output_path}")
+                        json.dump(file_list, f, ensure_ascii=False, indent=2)
+                    print(f"SUCCESS: Saved file metadata to {output_path}")
                     return file_list
                 except Exception as e:
-                    print(f"❌ Failed to extract or parse ZIP: {e}")
+                    print(f"ERROR: Failed to extract or parse ZIP: {e}")
                     return []
         except Exception as e:
-            print(f"❌ Error during scraping: {e}")
+            print(f"ERROR: Error during scraping: {e}")
             return []
 
 async def scrape_course_files(page: Page, course_id: str = "1006419", course_name: str = "Unknown Course", scrape_batch_id: str = None) -> List[Dict]:
@@ -295,7 +296,7 @@ async def wait_for_dashboard_ready(page: Page) -> bool:
         
         # Check if we're still on login page (session expired)
         if "login.microsoftonline.com" in page.url or "signin" in page.url.lower():
-            print("❌ Session expired - redirected to login page")
+            print("ERROR: Session expired - redirected to login page")
             return False
         
         # Now check if dashboard is ready
@@ -318,17 +319,17 @@ async def wait_for_dashboard_ready(page: Page) -> bool:
             try:
                 elements = await page.locator(selector).all()
                 if len(elements) > 0:
-                    print(f"✅ Found {len(elements)} elements with '{selector}'")
+                    print(f"SUCCESS: Found {len(elements)} elements with '{selector}'")
                     courses_found = True
                     break
             except:
                 continue
         
         if courses_found:
-            print("✅ Dashboard appears to be ready!")
+            print("SUCCESS: Dashboard appears to be ready!")
             return True
         else:
-            print("⚠️ No course elements found on dashboard")
+            print("WARNING: No course elements found on dashboard")
             print("This might mean:")
             print("  - Dashboard is still loading")
             print("  - You're not enrolled in any courses")
@@ -336,7 +337,7 @@ async def wait_for_dashboard_ready(page: Page) -> bool:
             return False
             
     except Exception as e:
-        print(f"❌ Error checking dashboard: {e}")
+        print(f"ERROR: Error checking dashboard: {e}")
         return False
 
 async def extract_course_links(page: Page) -> List[Tuple[str, str]]:
@@ -347,7 +348,7 @@ async def extract_course_links(page: Page) -> List[Tuple[str, str]]:
         
         # Wait for dashboard to be fully ready first
         if not await wait_for_dashboard_ready(page):
-            print("❌ Dashboard not ready, cannot extract courses")
+            print("ERROR: Dashboard not ready, cannot extract courses")
             return []
         
         # Now extract courses (dashboard should be ready)
@@ -400,7 +401,7 @@ async def extract_course_links(page: Page) -> List[Tuple[str, str]]:
                 all_links.extend(links)
                 print(f"  Found {len(links)} links with selector: {selector}")
             except Exception as e:
-                print(f"  ⚠️ Error with selector '{selector}': {e}")
+                print(f"  WARNING: Error with selector '{selector}': {e}")
                 continue
         
         # Remove duplicates while preserving order
@@ -454,7 +455,7 @@ async def extract_course_links(page: Page) -> List[Tuple[str, str]]:
                 should_exclude = False
                 for pattern in exclude_patterns:
                     if re.search(pattern, href):
-                        print(f"    ❌ Excluded (matches pattern: {pattern})")
+                        print(f"    ERROR: Excluded (matches pattern: {pattern})")
                         should_exclude = True
                         break
                 
@@ -474,11 +475,11 @@ async def extract_course_links(page: Page) -> List[Tuple[str, str]]:
                     match = re.search(pattern, href)
                     if match:
                         course_id = match.group(1)
-                        print(f"    ✅ Found course ID: {course_id}")
+                        print(f"    SUCCESS: Found course ID: {course_id}")
                         break
                 
                 if not course_id:
-                    print(f"    ⚠️ Could not extract course ID from: {href}")
+                    print(f"    WARNING: Could not extract course ID from: {href}")
                     continue
                 
                 # Extract course name from link text or nearby elements
@@ -508,7 +509,7 @@ async def extract_course_links(page: Page) -> List[Tuple[str, str]]:
                             except:
                                 continue
                     except Exception as e:
-                        print(f"    ⚠️ Error finding parent text: {e}")
+                        print(f"    WARNING: Error finding parent text: {e}")
                 
                 # Clean up course name
                 if course_name:
@@ -526,17 +527,17 @@ async def extract_course_links(page: Page) -> List[Tuple[str, str]]:
                     courses.append((course_name, course_id))
                     print(f"    📚 Added course: {course_name} (ID: {course_id})")
                 else:
-                    print(f"    ⚠️ Duplicate course ID: {course_id}")
+                    print(f"    WARNING: Duplicate course ID: {course_id}")
                 
             except Exception as e:
-                print(f"  ⚠️ Error processing link: {e}")
+                print(f"  WARNING: Error processing link: {e}")
                 continue
         
-        print(f"✅ Found {len(courses)} unique courses on dashboard")
+        print(f"SUCCESS: Found {len(courses)} unique courses on dashboard")
         return courses
         
     except Exception as e:
-        print(f"❌ Error extracting course links: {e}")
+        print(f"ERROR: Error extracting course links: {e}")
         return []
 
 def manual_course_input() -> Tuple[str, str]:
@@ -550,9 +551,9 @@ def manual_course_input() -> Tuple[str, str]:
             if course_id and course_id.isdigit():
                 break
             else:
-                print("❌ Please enter a valid numeric course ID")
+                print("ERROR: Please enter a valid numeric course ID")
         except KeyboardInterrupt:
-            print("\n❌ Manual input cancelled")
+            print("\nERROR: Manual input cancelled")
             return None, None
     
     course_name = input("Enter course name (optional, press Enter to skip): ").strip()
@@ -564,10 +565,10 @@ def manual_course_input() -> Tuple[str, str]:
 def display_course_selection(courses: List[Tuple[str, str]]) -> int:
     """Display courses to user and get their selection."""
     if not courses:
-        print("❌ No courses found on dashboard")
+        print("ERROR: No courses found on dashboard")
         return -1
     
-    print("\n📋 Courses found:")
+    print("\nLIST: Courses found:")
     for i, (name, course_id) in enumerate(courses, 1):
         print(f"[{i}] {name} (ID: {course_id})")
     
@@ -578,14 +579,14 @@ def display_course_selection(courses: List[Tuple[str, str]]) -> int:
             
             if 0 <= course_index < len(courses):
                 selected_course = courses[course_index]
-                print(f"✅ Selected: {selected_course[0]} (ID: {selected_course[1]})")
+                print(f"SUCCESS: Selected: {selected_course[0]} (ID: {selected_course[1]})")
                 return course_index
             else:
-                print(f"❌ Please enter a number between 1 and {len(courses)}")
+                print(f"ERROR: Please enter a number between 1 and {len(courses)}")
         except ValueError:
-            print("❌ Please enter a valid number")
+            print("ERROR: Please enter a valid number")
         except KeyboardInterrupt:
-            print("\n❌ Selection cancelled")
+            print("\nERROR: Selection cancelled")
             return -1
 
 async def scrape_onq_files_with_authentication(browser, context, page, scrape_batch_id: str = None) -> Dict:
@@ -605,14 +606,14 @@ async def scrape_onq_files_with_authentication(browser, context, page, scrape_ba
         if scrape_batch_id is None:
             scrape_batch_id = datetime.datetime.now().strftime('batch_%Y%m%d-%H%M%S')
         
-        print(f"🚀 Starting OnQ file scraping (batch: {scrape_batch_id})")
+        print(f"STARTING: Starting OnQ file scraping (batch: {scrape_batch_id})")
         
         # Extract course links from the dashboard
         courses = await extract_course_links(page)
         
         # Handle case when no courses are found automatically
         if not courses:
-            print("\n⚠️ No courses found automatically.")
+            print("\nWARNING: No courses found automatically.")
             print("This could be due to:")
             print("  - Dashboard still loading")
             print("  - Different page layout")
@@ -626,10 +627,10 @@ async def scrape_onq_files_with_authentication(browser, context, page, scrape_ba
                     courses = [(course_name, course_id)]
                     selected_course_index = 0
                 else:
-                    print("❌ Manual input cancelled")
+                    print("ERROR: Manual input cancelled")
                     return {'files': [], 'course_id': None, 'course_name': None, 'course_json_path': None, 'scrape_batch_id': scrape_batch_id}
             else:
-                print("❌ No course selected")
+                print("ERROR: No course selected")
                 return {'files': [], 'course_id': None, 'course_name': None, 'course_json_path': None, 'scrape_batch_id': scrape_batch_id}
         else:
             # Display course selection
@@ -638,7 +639,7 @@ async def scrape_onq_files_with_authentication(browser, context, page, scrape_ba
         if selected_course_index != -1:
             # Get the selected course details
             selected_course_name, selected_course_id = courses[selected_course_index]
-            print(f"\n🚀 Starting scraping for: {selected_course_name} (ID: {selected_course_id})")
+            print(f"\nSTARTING: Starting scraping for: {selected_course_name} (ID: {selected_course_id})")
             
             # First navigate to the course home page
             course_home_url = f"https://onq.queensu.ca/d2l/home/{selected_course_id}"
@@ -667,24 +668,24 @@ async def scrape_onq_files_with_authentication(browser, context, page, scrape_ba
                     try:
                         content_link = await page.query_selector(selector)
                         if content_link and await content_link.is_visible():
-                            print(f"✅ Found Content link with selector: {selector}")
+                            print(f"SUCCESS: Found Content link with selector: {selector}")
                             await content_link.click()
                             await page.wait_for_load_state("networkidle")
                             content_clicked = True
                             break
                     except Exception as e:
-                        print(f"  ⚠️ Selector '{selector}' failed: {e}")
+                        print(f"  WARNING: Selector '{selector}' failed: {e}")
                         continue
                 
                 if not content_clicked:
-                    print("⚠️ Could not find Content link, trying direct navigation...")
+                    print("WARNING: Could not find Content link, trying direct navigation...")
                     # Fallback: try direct navigation to content page
                     content_url = f"https://onq.queensu.ca/d2l/le/content/{selected_course_id}/Home"
                     await page.goto(content_url)
                     await page.wait_for_load_state("networkidle")
                     
             except Exception as e:
-                print(f"⚠️ Error navigating to content: {e}")
+                print(f"WARNING: Error navigating to content: {e}")
                 # Try direct navigation as fallback
                 content_url = f"https://onq.queensu.ca/d2l/le/content/{selected_course_id}/Home"
                 print(f"🔄 Trying direct navigation to: {content_url}")
@@ -695,7 +696,7 @@ async def scrape_onq_files_with_authentication(browser, context, page, scrape_ba
             files = await scrape_course_files(page, selected_course_id, selected_course_name, scrape_batch_id=scrape_batch_id)
             
             # Print results
-            print("\n📋 Scraped Files:")
+            print("\nLIST: Scraped Files:")
             for i, file_info in enumerate(files, 1):
                 print(f"\n{i}. {file_info['filename']}")
                 print(f"   Path: {file_info['path']}")
@@ -703,9 +704,9 @@ async def scrape_onq_files_with_authentication(browser, context, page, scrape_ba
                 print(f"   Source: {file_info['source']}")
             
             # Show download summary
-            print("\n📁 Downloaded files to 'downloads/' folder:")
+            print("\nFILES: Downloaded files to 'downloads/' folder:")
             for file_info in files:
-                print(f"   • {file_info['filename']} ({file_info['file_type']})")
+                print(f"   * {file_info['filename']} ({file_info['file_type']})")
             
             # Construct the course JSON path
             safe_course_name = sanitize_filename(selected_course_name)
@@ -723,7 +724,7 @@ async def scrape_onq_files_with_authentication(browser, context, page, scrape_ba
             return {'files': [], 'course_id': None, 'course_name': None, 'course_json_path': None, 'scrape_batch_id': scrape_batch_id}
         
     except Exception as e:
-        print(f"❌ Error during scraping: {e}")
+        print(f"ERROR: Error during scraping: {e}")
         return {'files': [], 'course_id': None, 'course_name': None, 'course_json_path': None, 'scrape_batch_id': scrape_batch_id}
 
 
@@ -750,11 +751,11 @@ async def main():
             if os.path.exists("onq_state.json"):
                 context = await browser.new_context(storage_state="onq_state.json")
                 page = await context.new_page()
-                print("✅ Loaded existing OnQ session.")
+                print("SUCCESS: Loaded existing OnQ session.")
             else:
                 context = await browser.new_context()
                 page = await context.new_page()
-                print("🔐 Please log in manually to OnQ...")
+                print("*** Please log in manually to OnQ...")
                 print("1. Navigate to https://onq.queensu.ca/")
                 print("2. Complete the login and 2FA process")
                 print("3. Wait for the page to load completely")
@@ -762,19 +763,19 @@ async def main():
                 
                 input("Press Enter when you're logged in...")
                 await context.storage_state(path="onq_state.json")
-                print("✅ Session saved to onq_state.json.")
+                print("SUCCESS: Session saved to onq_state.json.")
             
             # Use the new integrated function
             scrape_result = await scrape_onq_files_with_authentication(browser, context, page, scrape_batch_id)
             files = scrape_result.get('files', [])
             
             if files:
-                print(f"\n✅ Successfully scraped {len(files)} files")
+                print(f"\nSUCCESS: Successfully scraped {len(files)} files")
             else:
-                print("\n❌ No files were scraped")
+                print("\nERROR: No files were scraped")
             
         except Exception as e:
-            print(f"❌ Error in main: {e}")
+            print(f"ERROR: Error in main: {e}")
         finally:
             await browser.close()
 
